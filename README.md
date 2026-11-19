@@ -1,2 +1,3 @@
-# aircraft-doppler
-Aircraft Doppler localisation: a reproducible audio experiment with synthetic flight tracks.
+# Aircraft Doppler
+
+The synthetic demo and runnable source are being prepared.
