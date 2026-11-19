@@ -1,0 +1,435 @@
+{
+  "source_commit": "26eb28ba28cb6751a4b8960b7a0d3a6721c7677e",
+  "station_id": "ESID_505",
+  "registered_packet": "Fe45fe4783028d3a6",
+  "known_answer_development_replay": true,
+  "audio_acquisition": {
+    "url": "https://zenodo.org/api/records/21808323/files/ESID_505_2024_04_07.zip/content",
+    "member": "ESID_505_2024_04_07/20240407_163418.WAV",
+    "member_crc32": "f99b140e",
+    "member_compressed_bytes": 3362407331,
+    "member_bytes": 4294944488,
+    "compression_method": 8,
+    "sample_rate_hz": 48000,
+    "member_duration_s": 44739.0,
+    "offset_s": 0,
+    "duration_s": 2700,
+    "excerpt_sha256": "9d81312496436a35015743177680ad6bbbec4c9eb9ad35da3b86ea2ddbbc223a",
+    "archive_bytes_fetched": 205521451
+  },
+  "track_acquisition": {
+    "traces_seen": 51648,
+    "traces_retained": 163,
+    "points_without_geometric_height": 76,
+    "retained_points": 12034,
+    "archive_bytes_streamed": 1900820480,
+    "urls": [
+      "https://github.com/adsblol/globe_history_2024/releases/download/v2024.04.07-planes-readsb-prod-0/v2024.04.07-planes-readsb-prod-0.tar"
+    ],
+    "center_lat_lon": [
+      39.73,
+      -84.2
+    ],
+    "half_width_km": 25,
+    "start_utc_s": 1712507220.0,
+    "stop_utc_s": 1712515560.0,
+    "license": "ODbL-1.0",
+    "source": "adsb.lol contributors"
+  },
+  "origin_lat_lon_ellipsoid_m": [
+    39.73,
+    -84.2,
+    190
+  ],
+  "grid_width_m": 10000,
+  "numerical_environment": {
+    "python": "3.12.10",
+    "numpy": "2.3.5",
+    "scipy": "1.17.0",
+    "pandas": "2.2.3"
+  },
+  "runs": [
+    {
+      "arm": "registered",
+      "status": "abstained",
+      "duration_s": 300,
+      "claimed_start_utc_s": 1712507658.0,
+      "clock_half_s": 300,
+      "detector_profile": "interior-only",
+      "budget_s": 120,
+      "wall_s": 0.669,
+      "ridges_selected": 0,
+      "track_audit": {
+        "nearby_aircraft": 35,
+        "points_in_temporal_crop": 2248,
+        "short_segments": 64,
+        "non_subsonic_segments": 1,
+        "retained_segments": 52
+      },
+      "reasons": [
+        "No supported descending ridge in the fixed field bands"
+      ],
+      "input_sha256": {
+        "wav": "55b1e5d8c6c8b7768d0c9314b816941730168fb1925855c2f179dcffcfa9d5f0",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "registered-interior",
+      "final_spacing_m": 25,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": null,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    },
+    {
+      "arm": "registered",
+      "status": "abstained",
+      "duration_s": 300,
+      "claimed_start_utc_s": 1712507658.0,
+      "clock_half_s": 300,
+      "detector_profile": "edge-aware",
+      "budget_s": 120,
+      "wall_s": 52.562,
+      "ridges_selected": 1,
+      "hypotheses_ranked": 22,
+      "ridge_rmse_hz": [
+        0.23665077224927605
+      ],
+      "near_best_count": 157,
+      "near_best_span_enu_m": [
+        700,
+        2375
+      ],
+      "diagnostic_clock_offset_s": -74.25,
+      "diagnostic_point_lat_lon": [
+        39.713551659882114,
+        -84.14781473027038
+      ],
+      "search_audit": {
+        "tracks_input": 52,
+        "positions_scored": 4962,
+        "pairs_scored": 104320,
+        "global_clock_pair_hypotheses_with_coverage": 16733346,
+        "local_clock_pair_hypotheses_with_coverage": 2674584
+      },
+      "track_audit": {
+        "nearby_aircraft": 35,
+        "points_in_temporal_crop": 2248,
+        "short_segments": 64,
+        "non_subsonic_segments": 1,
+        "retained_segments": 52
+      },
+      "reasons": [
+        "Event 1 failed locked predictions on withheld audio (50% blocks passed)",
+        "One ridge cannot satisfy the two-independent-pass acceptance gate",
+        "Near-best support is spatially broad or lacks fine neighborhoods"
+      ],
+      "input_sha256": {
+        "wav": "55b1e5d8c6c8b7768d0c9314b816941730168fb1925855c2f179dcffcfa9d5f0",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "registered",
+      "final_spacing_m": 25,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [
+        0.5
+      ],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": 394.7064955495211,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    },
+    {
+      "arm": "extended",
+      "status": "timed_out",
+      "duration_s": 1800,
+      "claimed_start_utc_s": 1712507658.0,
+      "clock_half_s": 300,
+      "detector_profile": "edge-aware",
+      "budget_s": 120,
+      "wall_s": 120.05,
+      "ridges_selected": 2,
+      "search_audit": {
+        "tracks_input": 112,
+        "positions_scored": 441,
+        "pairs_scored": 85314,
+        "global_clock_pair_hypotheses_with_coverage": 6146418,
+        "local_clock_pair_hypotheses_with_coverage": 2084945
+      },
+      "track_audit": {
+        "nearby_aircraft": 72,
+        "points_in_temporal_crop": 4452,
+        "short_segments": 270,
+        "non_subsonic_segments": 1,
+        "retained_segments": 112
+      },
+      "reasons": [
+        "Wall-clock budget reached; no unfinished case is counted as verified."
+      ],
+      "input_sha256": {
+        "wav": "0dbd141dacf2d756d1b9dacdb67bbcb2be982f180a41eb9000dc0e9f42dc3d33",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "extended",
+      "final_spacing_m": 25,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": null,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    },
+    {
+      "arm": "extended",
+      "status": "timed_out",
+      "duration_s": 1800,
+      "claimed_start_utc_s": 1712507658.0,
+      "clock_half_s": 300,
+      "detector_profile": "edge-aware",
+      "budget_s": 180,
+      "wall_s": 180.026,
+      "ridges_selected": 2,
+      "search_audit": {
+        "tracks_input": 112,
+        "positions_scored": 441,
+        "pairs_scored": 85314,
+        "global_clock_pair_hypotheses_with_coverage": 6146418,
+        "local_clock_pair_hypotheses_with_coverage": 2084945
+      },
+      "track_audit": {
+        "nearby_aircraft": 72,
+        "points_in_temporal_crop": 4452,
+        "short_segments": 270,
+        "non_subsonic_segments": 1,
+        "retained_segments": 112
+      },
+      "reasons": [
+        "Wall-clock budget reached; no unfinished case is counted as verified."
+      ],
+      "input_sha256": {
+        "wav": "0dbd141dacf2d756d1b9dacdb67bbcb2be982f180a41eb9000dc0e9f42dc3d33",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "extended-180s",
+      "final_spacing_m": 25,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": null,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    },
+    {
+      "arm": "extended",
+      "status": "abstained",
+      "duration_s": 1800,
+      "claimed_start_utc_s": 1712507658.0,
+      "clock_half_s": 300,
+      "detector_profile": "edge-aware",
+      "budget_s": 120,
+      "wall_s": 77.61,
+      "ridges_selected": 2,
+      "hypotheses_ranked": 228,
+      "ridge_rmse_hz": [
+        0.2998385740051397,
+        5.298888533730945
+      ],
+      "near_best_count": 2,
+      "near_best_span_enu_m": [
+        100,
+        0
+      ],
+      "diagnostic_clock_offset_s": -84.625,
+      "diagnostic_point_lat_lon": [
+        39.72008006660375,
+        -84.14518572157358
+      ],
+      "search_audit": {
+        "tracks_input": 112,
+        "positions_scored": 1178,
+        "pairs_scored": 226990,
+        "global_clock_pair_hypotheses_with_coverage": 16435830,
+        "local_clock_pair_hypotheses_with_coverage": 5578620
+      },
+      "track_audit": {
+        "nearby_aircraft": 72,
+        "points_in_temporal_crop": 4452,
+        "short_segments": 270,
+        "non_subsonic_segments": 1,
+        "retained_segments": 112
+      },
+      "reasons": [
+        "Event 1 failed locked predictions on withheld audio (50% blocks passed)",
+        "Event 2 failed locked predictions on withheld audio (0% blocks passed)",
+        "The coarser diagnostic profile omits the required 25 m verification grid",
+        "At least one ridge exceeds the absolute training RMSE gate"
+      ],
+      "input_sha256": {
+        "wav": "0dbd141dacf2d756d1b9dacdb67bbcb2be982f180a41eb9000dc0e9f42dc3d33",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "extended-100m",
+      "final_spacing_m": 100,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [
+        0.5,
+        0.0
+      ],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": 1035.6783032635187,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    },
+    {
+      "arm": "adjacent",
+      "status": "abstained",
+      "duration_s": 900,
+      "claimed_start_utc_s": 1712509458.0,
+      "clock_half_s": 300,
+      "detector_profile": "edge-aware",
+      "budget_s": 120,
+      "wall_s": 1.918,
+      "ridges_selected": 0,
+      "track_audit": {
+        "nearby_aircraft": 43,
+        "points_in_temporal_crop": 1843,
+        "short_segments": 198,
+        "non_subsonic_segments": 0,
+        "retained_segments": 62
+      },
+      "reasons": [
+        "No supported descending ridge in the fixed field bands"
+      ],
+      "input_sha256": {
+        "wav": "7dc969eef45dfb4311ddcc5cfa30ada94b74ae7b1d4c2b9f05a4f1ed4d08a7d0",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "adjacent",
+      "final_spacing_m": 25,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": null,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    },
+    {
+      "arm": "wrong-time",
+      "status": "abstained",
+      "duration_s": 300,
+      "claimed_start_utc_s": 1712514858.0,
+      "clock_half_s": 300,
+      "detector_profile": "edge-aware",
+      "budget_s": 120,
+      "wall_s": 28.171,
+      "ridges_selected": 1,
+      "hypotheses_ranked": 14,
+      "ridge_rmse_hz": [
+        1.1061271958703034
+      ],
+      "near_best_count": 49,
+      "near_best_span_enu_m": [
+        125,
+        400
+      ],
+      "diagnostic_clock_offset_s": 223.375,
+      "diagnostic_point_lat_lon": [
+        39.685193218370905,
+        -84.20233134784198
+      ],
+      "search_audit": {
+        "tracks_input": 36,
+        "positions_scored": 4386,
+        "pairs_scored": 60160,
+        "global_clock_pair_hypotheses_with_coverage": 8210203,
+        "local_clock_pair_hypotheses_with_coverage": 1808331
+      },
+      "track_audit": {
+        "nearby_aircraft": 33,
+        "points_in_temporal_crop": 1227,
+        "short_segments": 112,
+        "non_subsonic_segments": 0,
+        "retained_segments": 36
+      },
+      "reasons": [
+        "Event 1 failed locked predictions on withheld audio (0% blocks passed)",
+        "One ridge cannot satisfy the two-independent-pass acceptance gate",
+        "At least one ridge exceeds the absolute training RMSE gate",
+        "Near-best support is spatially broad or lacks fine neighborhoods",
+        "Near-best support touches the search boundary"
+      ],
+      "input_sha256": {
+        "wav": "55b1e5d8c6c8b7768d0c9314b816941730168fb1925855c2f179dcffcfa9d5f0",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "wrong-time",
+      "final_spacing_m": 25,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [
+        0.0
+      ],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": 5253.457753935198,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    },
+    {
+      "arm": "wrong-audio",
+      "status": "abstained",
+      "duration_s": 300,
+      "claimed_start_utc_s": 1712507658.0,
+      "clock_half_s": 300,
+      "detector_profile": "edge-aware",
+      "budget_s": 120,
+      "wall_s": 0.76,
+      "ridges_selected": 0,
+      "track_audit": {
+        "nearby_aircraft": 35,
+        "points_in_temporal_crop": 2248,
+        "short_segments": 64,
+        "non_subsonic_segments": 1,
+        "retained_segments": 52
+      },
+      "reasons": [
+        "No supported descending ridge in the fixed field bands"
+      ],
+      "input_sha256": {
+        "wav": "7c084dcc458121dda1477dbb536f910ce2025e441e7563321690201b9e701eb0",
+        "regional_adsb": "31696cc13199d2f13c5318d832d9fcbd513b957061b2e5d629aa74e8ad07502b"
+      },
+      "run": "wrong-audio",
+      "final_spacing_m": 25,
+      "previous_detector_status": "abstained",
+      "locked_passing_fractions": [],
+      "reference_lat_lon": [
+        39.7125,
+        -84.152222
+      ],
+      "diagnostic_great_circle_error_m": null,
+      "estimated_great_circle_error_m": null,
+      "hit_within_1000_m": false
+    }
+  ]
+}

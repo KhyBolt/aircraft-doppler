@@ -6,7 +6,9 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 from numpy.testing import assert_allclose
-from aircraft_doppler.wide import (CLOCKS, _trace_loss, _minima, _modes, BudgetExceeded, _deadline_check,
+from aircraft_doppler.physics import Track, forward_curve
+from aircraft_doppler.search import Event
+from aircraft_doppler.wide import (CLOCKS, Profile, _trace_loss, _minima, _modes, BudgetExceeded, _deadline_check,
                                    evaluate, infer, run)
 
 
@@ -31,6 +33,23 @@ class WideSyntheticTests(unittest.TestCase):
     def test_clock_basins_allow_an_inclusive_global_end(self):
         assert_allclose(_minima(np.array([5.,9.,4.,6.,1.])),[4,2,0])
         self.assertEqual(len(_minima(np.array([np.inf,np.inf]))),0)
+
+    def test_one_event_honors_the_requested_clock_prior(self):
+        time_s = np.arange(100., 260.)
+        track = Track("pass", time_s, np.column_stack((75 * (time_s - 178),
+                      np.full_like(time_s, 1000), np.full_like(time_s, 800))))
+        observer = (0, 0, 0)
+        curve = forward_curve(track, observer)
+        audio_t = np.arange(10., 40., .5)
+        observed = 120 * np.interp(audio_t + 160, curve.arrival_s, curve.ratio)
+        event = Event((audio_t[0], audio_t[-1]), 22, (110, 130, .2),
+                      trace_points=np.column_stack((audio_t, observed)).tolist())
+        self.assertTrue(Profile([track], [event]).table([observer]).empty)
+        recovered = Profile([track], [event], clock_center_s=155, clock_half_s=5).table([observer]).iloc[0]
+        self.assertEqual(recovered.flight_pair, "pass")
+        self.assertEqual(recovered.clock_offset_s, 160)
+        self.assertAlmostEqual(recovered.loss_hz2, 0)
+        self.assertAlmostEqual(recovered.event_1_source_hz, 120)
 
     def test_no_top_pair_quota_drops_viable_distant_alternatives(self):
         points = [(0,0,0), (2000,0,0), (0,2000,0), (2000,2000,0), (-2000,2000,0)]

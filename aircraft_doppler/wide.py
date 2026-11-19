@@ -1,5 +1,6 @@
 """Fixed, offline, synthetic-only 10-by-10 km benchmark (no data source or network)."""
 from dataclasses import asdict
+from itertools import product
 from pathlib import Path
 from time import perf_counter
 import hashlib
@@ -10,6 +11,7 @@ from .audio import make_spectrogram, read_audio
 from .benchmark import STFT_SETTINGS, XYZ, _write_json
 from .detection import InsufficientEvidence, detect_two_events_among_distractors
 from .io import load_inputs
+from .search import _time_offsets
 
 PROFILE = "synthetic-wide-v2"
 SOUND_MPS = 343.
@@ -26,8 +28,6 @@ PAIR_MSE_GAP_HZ2 = .0064
 MAX_SPAN_M = 400.
 # Spatial mode caps apply in addition to retained viable per-pair centers.
 STAGES = ((100, 600, 7, 2.0), (25, 250, 6, 0.5))
-FIELDS = [*XYZ, "loss_hz2", "flight_pair", "clock_offset_s", "event_1_loss_hz2",
-          "event_2_loss_hz2", "event_1_source_hz", "event_2_source_hz"]
 CLOCKS = np.arange(-CLOCK_HALF_S,CLOCK_HALF_S + CLOCK_STEP_S/2,CLOCK_STEP_S)
 LOCAL_OFFSETS = np.arange(-LOCAL_HALF_S,LOCAL_HALF_S + LOCAL_STEP_S/2,LOCAL_STEP_S)
 PROGRAM_SETTINGS = {"bounds_xy_m": [[-EDGE_M,EDGE_M],[-EDGE_M,EDGE_M]], "height_m": 0,
@@ -92,18 +92,32 @@ def _minima(v):
 
 
 class Profile:
-    def __init__(self, tracks, events, deadline=None, *, trace_override=None):
+    def __init__(self, tracks, events, deadline=None, *, trace_override=None,
+                 clock_center_s=0., clock_half_s=CLOCK_HALF_S):
+        if len(events) not in (1, 2):
+            raise ValueError("The ridge profile needs one or two events")
+        if not np.isfinite(clock_center_s) or not np.isfinite(clock_half_s) or clock_half_s < 0:
+            raise ValueError("Invalid clock center or half width")
         self.traces = ([np.asarray(event.trace_points,float) for event in events]
                        if trace_override is None else trace_override)
         self.bands = [e.f0_hz[:2] for e in events]
-        self.coverage = ([None,None] if trace_override is None else [e.window_s for e in events])
+        self.allowed_engines = [e.allowed_engines for e in events]
+        self.coverage = ([None] * len(events) if trace_override is None else [e.window_s for e in events])
+        self.clock_center = clock_center_s
+        self.clock_half = clock_half_s
+        self.clock_lo, self.clock_hi = clock_center_s - clock_half_s, clock_center_s + clock_half_s
+        self.clocks = clock_center_s + _time_offsets(clock_half_s, CLOCK_STEP_S)
+        self.fields = [*XYZ, "loss_hz2", "flight_pair", "clock_offset_s",
+                       *(f"event_{i}_loss_hz2" for i in range(1, len(events) + 1)),
+                       *(f"event_{i}_source_hz" for i in range(1, len(events) + 1))]
         self.flights = []
         for track in tracks:
             t = np.linspace(track.t[0],track.t[-1],int(np.ceil((track.t[-1]-track.t[0])/.25))+1)
             velocity = track.velocity(t)
             if (np.linalg.norm(velocity,axis=1) >= SOUND_MPS).any():
                 raise ValueError("Model only supports subsonic tracks")
-            self.flights.append((track.flight_id,track.aircraft_id or track.flight_id,t,track.position(t),velocity))
+            self.flights.append((track.flight_id, track.aircraft_id or track.flight_id,
+                                 track.engine, t, track.position(t), velocity))
         self.cache = {}
         self.deadline = deadline
         self.audit = {"tracks_input":len(self.flights), "positions_scored":0, "pairs_scored":0,
@@ -114,13 +128,13 @@ class Profile:
             return self.cache[pos]
         _deadline_check(self.deadline)
         curves = {}
-        options = [{},{}]
-        for fid,aid,te,p,v in self.flights:
+        options = [{} for _ in self.traces]
+        for fid,aid,engine,te,p,v in self.flights:
             # A necessary independent precheck, not dependent on ground truth,
             # a guessed CPA, or a presumed aircraft identity.
             d = p[[0,-1]]-pos
-            if not any(start+CLOCK_HALF_S >= te[0]+np.linalg.norm(d[0])/SOUND_MPS and
-                       stop-CLOCK_HALF_S <= te[-1]+np.linalg.norm(d[-1])/SOUND_MPS
+            if not any(start+self.clock_center+self.clock_half >= te[0]+np.linalg.norm(d[0])/SOUND_MPS and
+                       stop+self.clock_center-self.clock_half <= te[-1]+np.linalg.norm(d[-1])/SOUND_MPS
                        for obs,cover in zip(self.traces,self.coverage)
                        for start,stop in [cover if cover is not None else (obs[0,0],obs[-1,0])]):
                 continue
@@ -132,41 +146,44 @@ class Profile:
             curve = te+slant/SOUND_MPS, ratio
             # The curve is monotonically increasing for every subsonic track.
             for i,(obs,band) in enumerate(zip(self.traces,self.bands)):
-                total, f = _trace_loss(curve,obs,band,CLOCKS,self.coverage[i])
+                if engine not in self.allowed_engines[i]:
+                    continue
+                total, f = _trace_loss(curve,obs,band,self.clocks,self.coverage[i])
                 if np.isfinite(total).any():
                     options[i][fid] = aid,total,f
                     curves[fid] = curve
         rows = []
-        for f1,(a1,s1,h1) in options[0].items():
-            for f2,(a2,s2,h2) in options[1].items():
-                if a1 == a2:
+        for choice in product(*(options_for_event.items() for options_for_event in options)):
+            ids, matches = zip(*choice)
+            aircraft, losses, sources = zip(*matches)
+            if len(set(aircraft)) < len(ids):
+                continue
+            scores = np.mean(losses, axis=0)
+            self.audit["global_clock_pair_hypotheses_with_coverage"] += int(np.isfinite(scores).sum())
+            minima = _minima(scores)
+            if not len(minima):
+                continue
+            i = minima[0]
+            best = (scores[i], self.clocks[i], *(loss[i] for loss in losses), *(f[i] for f in sources))
+            basins = []
+            for i in minima:
+                clock = self.clocks[i]
+                if any(abs(clock-previous) <= 2*LOCAL_HALF_S for previous in basins):
                     continue
-                scores = .5*(s1+s2)
-                self.audit["global_clock_pair_hypotheses_with_coverage"] += int(np.isfinite(scores).sum())
-                minima = _minima(scores)
-                if not len(minima):
-                    continue
-                # Retain the best global grid score even if a narrow local
-                # search cannot improve it. Refine up to two separated basins.
-                i = minima[0]
-                best = (scores[i],CLOCKS[i],s1[i],s2[i],h1[i],h2[i])
-                basins = []
-                for i in minima:
-                    if any(abs(CLOCKS[i]-previous) <= 2*LOCAL_HALF_S for previous in basins):
-                        continue
-                    basins.append(CLOCKS[i])
-                    offsets = CLOCKS[i]+LOCAL_OFFSETS
-                    offsets = offsets[abs(offsets) <= CLOCK_HALF_S]
-                    v1,g1 = _trace_loss(curves[f1],self.traces[0],self.bands[0],offsets,self.coverage[0])
-                    v2,g2 = _trace_loss(curves[f2],self.traces[1],self.bands[1],offsets,self.coverage[1])
-                    total = .5*(v1+v2)
-                    self.audit["local_clock_pair_hypotheses_with_coverage"] += int(np.isfinite(total).sum())
-                    j = int(np.argmin(total))
-                    if total[j] < best[0]:
-                        best = (total[j],offsets[j],v1[j],v2[j],g1[j],g2[j])
-                    if len(basins) == CLOCK_BASINS:
-                        break
-                rows.append((*pos,best[0],f"{f1}|{f2}",*best[1:]))
+                basins.append(clock)
+                offsets = clock + LOCAL_OFFSETS
+                offsets = offsets[(self.clock_lo <= offsets) & (offsets <= self.clock_hi)]
+                profiled = [_trace_loss(curves[fid], trace, band, offsets, coverage)
+                            for fid, trace, band, coverage in zip(ids, self.traces, self.bands, self.coverage)]
+                losses_local, sources_local = zip(*profiled)
+                total = np.mean(losses_local, axis=0)
+                self.audit["local_clock_pair_hypotheses_with_coverage"] += int(np.isfinite(total).sum())
+                j = int(np.argmin(total))
+                if total[j] < best[0]:
+                    best = (total[j], offsets[j], *(v[j] for v in losses_local), *(f[j] for f in sources_local))
+                if len(basins) == CLOCK_BASINS:
+                    break
+            rows.append((*pos, best[0], "|".join(ids), *best[1:]))
         self.audit["positions_scored"] += 1
         self.audit["pairs_scored"] += len(rows)
         self.cache[pos] = rows
@@ -174,7 +191,7 @@ class Profile:
 
     def table(self, points):
         data = [row for pos in points for row in self.at(pos)]
-        return pd.DataFrame(data,columns=FIELDS).sort_values(
+        return pd.DataFrame(data,columns=self.fields).sort_values(
             ["loss_hz2","x_m","y_m","flight_pair"],kind="stable").reset_index(drop=True)
 
 

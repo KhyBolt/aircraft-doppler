@@ -22,10 +22,17 @@ This list defines the publishable file set. It contains only reviewed source, ge
 - aircraft_doppler/wide.py
 - aircraft_doppler/wide_fixture.py
 - aircraft_doppler/wide_plot.py
+- benchmarks/crop_adsb.py
+- benchmarks/eclipse-505-protocol.md
+- benchmarks/eclipse_replay.py
+- benchmarks/plot_eclipse.py
+- benchmarks/range_wav.py
 - demo_replay.py
 - evidence/best_per_pair.csv
 - evidence/demo.png
 - evidence/detected_events.json
+- evidence/eclipse-505/registered-grid-500m.csv
+- evidence/eclipse-505/summary.json
 - evidence/grid_25m.csv
 - evidence/grid_500m.csv
 - evidence/scorecard.csv

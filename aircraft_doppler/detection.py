@@ -43,7 +43,30 @@ def _detect_two_events(spec, sound_speed_mps=343.0, *, reject_bad_candidates=Fal
     65–195 Hz, visible for roughly 40 s, separated by at least 55 s. These
     assumptions must not be mistaken for universal detector parameters.
     """
-    freq_mask = (spec.f >= 65) & (spec.f <= 195)
+    f, audio_db, evidence, dt, peaks = _find_tonal_peaks(spec, 65, 195)
+    if len(peaks) != 2 and not reject_bad_candidates:
+        raise InsufficientEvidence(f"Expected two isolated supported tones; detected {len(peaks)}")
+    events, diagnostics, rejected = [], [], []
+    for peak in peaks:
+        try:
+            event, diag = _characterize_peak(spec, audio_db, evidence, f, dt, peak, sound_speed_mps,
+                                             half_window_s=32 if reject_bad_candidates else 24)
+        except InsufficientEvidence as error:
+            if not reject_bad_candidates:
+                raise
+            rejected.append({"tonal_peak_audio_s": float(spec.t[peak]), "reason": str(error)})
+            continue
+        events.append(event)
+        diagnostics.append(diag)
+    if len(events) != 2:
+        error = InsufficientEvidence(f"Expected two supported descending tones; {len(events)} passed among {len(peaks)} peaks")
+        error.audit = {"accepted": diagnostics, "rejected": rejected, "raw_peak_count": int(len(peaks))}
+        raise error
+    return events, diagnostics, {"rejected": rejected, "raw_peak_count": int(len(peaks))}
+
+
+def _find_tonal_peaks(spec, low_hz, high_hz):
+    freq_mask = (spec.f >= low_hz) & (spec.f <= high_hz)
     f = spec.f[freq_mask]
     if len(f) < 4 or len(spec.t) < 4:
         raise InsufficientEvidence("Not enough spectrogram coverage for the benchmark profile")
@@ -63,25 +86,7 @@ def _detect_two_events(spec, sound_speed_mps=343.0, *, reject_bad_candidates=Fal
     peaks, _ = find_peaks(tonal, distance=max(1, round(55/dt)),
                          prominence=max(2.5, 2.8*spread),
                          height=base + max(2.0, 2.2*spread))
-    if len(peaks) != 2 and not reject_bad_candidates:
-        raise InsufficientEvidence(f"Expected two isolated supported tones; detected {len(peaks)}")
-    events, diagnostics, rejected = [], [], []
-    for peak in peaks:
-        try:
-            event, diag = _characterize_peak(spec, audio_db, evidence, f, dt, peak, sound_speed_mps,
-                                                 half_window_s=32 if reject_bad_candidates else 24)
-        except InsufficientEvidence as error:
-            if not reject_bad_candidates:
-                raise
-            rejected.append({"tonal_peak_audio_s": float(spec.t[peak]), "reason": str(error)})
-            continue
-        events.append(event)
-        diagnostics.append(diag)
-    if len(events) != 2:
-        error = InsufficientEvidence(f"Expected two supported descending tones; {len(events)} passed among {len(peaks)} peaks")
-        error.audit = {"accepted": diagnostics, "rejected": rejected, "raw_peak_count": int(len(peaks))}
-        raise error
-    return events, diagnostics, {"rejected": rejected, "raw_peak_count": int(len(peaks))}
+    return f, audio_db, evidence, dt, peaks
 
 
 def _characterize_peak(spec, audio_db, evidence, f, dt, peak, sound_speed_mps, *, half_window_s):
@@ -138,3 +143,45 @@ def detect_two_events(spec, sound_speed_mps=343.0):
 def detect_two_events_among_distractors(spec, sound_speed_mps=343.0):
     """Use the same evidence gates; reject invalid peaks rather than all input."""
     return _detect_two_events(spec, sound_speed_mps, reject_bad_candidates=True)
+
+
+FIELD_BANDS_HZ = ((60, 200), (150, 350), (275, 450))
+
+
+def detect_field_events(spec, sound_speed_mps=343.0, *, edge_aware=True):
+    """Select up to two disjoint ridges using audio alone and fixed bands."""
+    proposals, rejected = [], []
+    for low, high in FIELD_BANDS_HZ:
+        f, audio_db, evidence, dt, peaks = _find_tonal_peaks(spec, low, high)
+        windows = [(int(peak), 32) for peak in peaks]
+        if edge_aware:
+            for half_window in (12, 20, 32):
+                edge_offset = round(half_window / dt)
+                if 2 * edge_offset + 1 < len(spec.t):
+                    windows.extend(((edge_offset, half_window), (len(spec.t) - 1 - edge_offset, half_window)))
+        for peak, half_window in dict.fromkeys(windows):
+            band = {"band_hz": [low, high], "center_audio_s": float(spec.t[peak]), "half_window_s": half_window}
+            try:
+                event, diag = _characterize_peak(spec, audio_db, evidence, f, dt, peak,
+                                                 sound_speed_mps, half_window_s=half_window)
+            except InsufficientEvidence as error:
+                rejected.append({**band, "reason": str(error)})
+                continue
+            fit = diag["initial_ideal_fit"]
+            quality = diag["supported_fraction"] * diag["drop_hz"] / (fit["f0_hz"] * (1 + fit["rmse_hz"]))
+            proposals.append((quality, event, {**diag, **band, "audio_quality": quality}))
+    selected = []
+    for _, event, diag in sorted(proposals, key=lambda proposal: -proposal[0]):
+        if any(abs(event.cpa_audio_s-other.cpa_audio_s) < 55
+               or max(event.window_s[0], other.window_s[0]) <= min(event.window_s[1], other.window_s[1])
+               for other, _ in selected):
+            continue
+        selected.append((event, diag))
+        if len(selected) == 2:
+            break
+    selected.sort(key=lambda item: item[0].cpa_audio_s)
+    return [event for event, _ in selected], {
+        "selected": [diag for _, diag in selected],
+        "supported_proposals": [diag for _, _, diag in proposals],
+        "rejected": rejected,
+    }

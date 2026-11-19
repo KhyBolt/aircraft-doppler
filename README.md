@@ -73,3 +73,10 @@ accuracy claim or direct benchmark against other projects.
 
 See the [complete scorecard](evidence/scorecard.csv) and
 [provenance](RIGHTS.md).
+
+## Real-recording replay
+
+The [Eclipse Soundscapes 505 benchmark](benchmarks/eclipse-505-protocol.md)
+replays the solver on licensed field audio and historical ADS-B tracks. It
+includes the registered clip, a longer window, a disjoint same-station
+comparison, two negative controls, and a separately scored station reference.
