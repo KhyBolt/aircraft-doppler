@@ -1,0 +1,17 @@
+{
+  "kind": "synthetic only",
+  "seed": 73,
+  "observer_xyz_m": [
+    117.0,
+    -183.0,
+    0.0
+  ],
+  "audio_start_s": 0.0,
+  "render_sound_speed_mps": 343.0,
+  "noise_sd": 0.092,
+  "source_frequencies_hz": [
+    127.7,
+    105.9
+  ],
+  "correct_flight_pair": "flyover_a|flyover_b"
+}

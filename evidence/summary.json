@@ -1,0 +1,440 @@
+{
+  "profile": "synthetic-wide-v3-blocked",
+  "status": "supported_in_this_fixture",
+  "settings": {
+    "bounds_xy_m": [
+      [
+        -5000,
+        5000
+      ],
+      [
+        -5000,
+        5000
+      ]
+    ],
+    "height_m": 0,
+    "survey_spacing_m": 500,
+    "clock_global_bounds_s": [
+      -80,
+      80
+    ],
+    "clock_global_step_s": 1.0,
+    "clock_global_offsets": 161,
+    "clock_local_half_width_s": 1.0,
+    "clock_local_step_s": 0.125,
+    "clock_local_max_basins_per_pair_point": 2,
+    "clock_local_clipped_to_global": true,
+    "point_refinements": [
+      {
+        "spacing_m": 100,
+        "half_width_m": 600,
+        "max_separate_spatial_modes": 7,
+        "per_pair_refine_margin_hz2": 2.0
+      },
+      {
+        "spacing_m": 25,
+        "half_width_m": 250,
+        "max_separate_spatial_modes": 6,
+        "per_pair_refine_margin_hz2": 0.5
+      }
+    ],
+    "sound_speed_mps": 343.0,
+    "stft": {
+      "window_s": 2.0,
+      "hop_s": 0.25,
+      "fmin": 40,
+      "fmax": 450
+    },
+    "detector_half_window_s": 32,
+    "fit_rmse_limit_hz": 0.85,
+    "near_best_loss_hz2": 0.0064,
+    "pair_gap_hz2": 0.0064,
+    "maximum_support_span_m": 400.0
+  },
+  "inputs_sha256": {
+    "wav": "6b6cedbb75b74037d143b61393de8abb1fa2f138d5eb9e17351e5e038f11cce3",
+    "tracks": "d14ee08f8c5aab23c1f8903171f5afb4935ef651641d3334e70dc5e2695e12bc",
+    "candidates": "d2c3f2e85e44984b93257bcc535fc541e77227bba79cdbc6c51a18c6f3f53ab6"
+  },
+  "recording_duration_s": 1620.0,
+  "audio_only_detection": [
+    {
+      "tonal_peak_audio_s": 392.25,
+      "supported_fraction": 1.0,
+      "drop_hz": 34.8353980030991,
+      "observations": 129,
+      "initial_ideal_fit": {
+        "speed_mps": 102.12871666608257,
+        "slant_cpa_m": 6275.74118856968,
+        "f0_hz": 120.67504549191219,
+        "delayed_cpa_audio_s": 398.9398461398764,
+        "rmse_hz": 0.04177106305282413,
+        "success": true,
+        "warning": "Ideal constant-speed approximation only. Bounds are not confidence intervals; inspect residuals before pruning."
+      }
+    },
+    {
+      "tonal_peak_audio_s": 1311.75,
+      "supported_fraction": 0.9612403100775194,
+      "drop_hz": 33.221807447858296,
+      "observations": 124,
+      "initial_ideal_fit": {
+        "speed_mps": 98.79585928309486,
+        "slant_cpa_m": 4054.3048278492397,
+        "f0_hz": 104.7007352521603,
+        "delayed_cpa_audio_s": 1302.8141492226302,
+        "rmse_hz": 0.04449800948530719,
+        "success": true,
+        "warning": "Ideal constant-speed approximation only. Bounds are not confidence intervals; inspect residuals before pruning."
+      }
+    }
+  ],
+  "audio_audit": {
+    "rejected": [
+      {
+        "tonal_peak_audio_s": 107.5,
+        "reason": "A tone ridge has too little independent early/late support"
+      },
+      {
+        "tonal_peak_audio_s": 503.75,
+        "reason": "A tone ridge has too little independent early/late support"
+      },
+      {
+        "tonal_peak_audio_s": 697.5,
+        "reason": "A tone ridge has too little independent early/late support"
+      },
+      {
+        "tonal_peak_audio_s": 1031.25,
+        "reason": "A detected ridge lacks a sustained downward Doppler change"
+      },
+      {
+        "tonal_peak_audio_s": 1490.0,
+        "reason": "A detected ridge lacks a sustained downward Doppler change"
+      }
+    ],
+    "raw_peak_count": 7
+  },
+  "audio_event_separation_s": 903.874,
+  "input_track_ids": [
+    "sim-05",
+    "sim-17",
+    "sim-22",
+    "sim-37",
+    "sim-38",
+    "sim-41",
+    "sim-51",
+    "sim-53"
+  ],
+  "corroboration_settings": {
+    "period_s": 16.0,
+    "holdout_phase_s": [
+      6.0,
+      10.0
+    ],
+    "guard_s": 2.0,
+    "min_measured_frames_per_block": 5,
+    "min_heldout_blocks": 3,
+    "minimum_train_observations": 32,
+    "max_error_to_local_jitter": 3.0,
+    "minimum_passing_fraction": 0.75,
+    "stft_bin_floor_fraction": 0.125,
+    "require_full_track_coverage_and_disjoint_windows": true
+  },
+  "corroboration_observations": [
+    {
+      "fit_frames": 69,
+      "verification_blocks": 4
+    },
+    {
+      "fit_frames": 64,
+      "verification_blocks": 4
+    }
+  ],
+  "stage_audit": [
+    {
+      "spacing_m": 500,
+      "positions": 441,
+      "feasible_positions": 441,
+      "audit_cumulative": {
+        "tracks_input": 8,
+        "positions_scored": 441,
+        "pairs_scored": 3969,
+        "global_clock_pair_hypotheses_with_coverage": 346413,
+        "local_clock_pair_hypotheses_with_coverage": 81738
+      }
+    },
+    {
+      "spacing_m": 100,
+      "positions": 536,
+      "feasible_positions": 536,
+      "centers_xyz_m": [
+        [
+          4500,
+          -4500,
+          0
+        ],
+        [
+          3500,
+          -5000,
+          0
+        ],
+        [
+          1000,
+          -5000,
+          0
+        ],
+        [
+          5000,
+          3500,
+          0
+        ],
+        [
+          5000,
+          5000,
+          0
+        ],
+        [
+          -5000,
+          1500,
+          0
+        ]
+      ],
+      "audit_cumulative": {
+        "tracks_input": 8,
+        "positions_scored": 942,
+        "pairs_scored": 8478,
+        "global_clock_pair_hypotheses_with_coverage": 725205,
+        "local_clock_pair_hypotheses_with_coverage": 158430
+      }
+    },
+    {
+      "spacing_m": 25,
+      "positions": 1654,
+      "feasible_positions": 1654,
+      "centers_xyz_m": [
+        [
+          4500,
+          -4400,
+          0
+        ],
+        [
+          3600,
+          -4800,
+          0
+        ],
+        [
+          800,
+          -5000,
+          0
+        ],
+        [
+          5000,
+          3400,
+          0
+        ],
+        [
+          5000,
+          5000,
+          0
+        ],
+        [
+          -5000,
+          1500,
+          0
+        ]
+      ],
+      "audit_cumulative": {
+        "tracks_input": 8,
+        "positions_scored": 2492,
+        "pairs_scored": 22428,
+        "global_clock_pair_hypotheses_with_coverage": 1899354,
+        "local_clock_pair_hypotheses_with_coverage": 383641
+      }
+    }
+  ],
+  "audit": {
+    "tracks_input": 8,
+    "positions_scored": 2492,
+    "pairs_scored": 22428,
+    "global_clock_pair_hypotheses_with_coverage": 1899354,
+    "local_clock_pair_hypotheses_with_coverage": 383641
+  },
+  "best_fit_diagnostic": {
+    "loss_hz2": 0.0029615340432325703,
+    "xyz_m": [
+      4500.0,
+      -4400.0,
+      0.0
+    ],
+    "pair": "sim-17|sim-41",
+    "clock_offset_s": -66.875,
+    "per_event_rmse_hz": [
+      0.05064928346148351,
+      0.05794582099947704
+    ]
+  },
+  "number_of_feasible_pairs": 9,
+  "pair_gap_hz2": 0.8052502234488127,
+  "pair_ambiguous": false,
+  "near_best_grid": {
+    "span_xy_m": [
+      100.0,
+      100.0
+    ],
+    "point_count": 23,
+    "boundary": false,
+    "fine_neighborhood_complete": true
+  },
+  "abstention_reasons": [],
+  "corroboration": [
+    {
+      "event": 1,
+      "fitted_observations": 69,
+      "blocks": [
+        {
+          "audio_interval_s": [
+            366.25,
+            370.25
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.012880053974726025,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": 0.012880053974726025,
+          "error_to_jitter": 0.2060808635956164
+        },
+        {
+          "audio_interval_s": [
+            382.25,
+            386.25
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.025644318753336393,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": -0.025644318753336393,
+          "error_to_jitter": 0.4103091000533823
+        },
+        {
+          "audio_interval_s": [
+            398.25,
+            402.25
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.01639418422108463,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": -0.01639418422108463,
+          "error_to_jitter": 0.26230694753735406
+        },
+        {
+          "audio_interval_s": [
+            414.25,
+            418.25
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.02875574635933731,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": 0.02875574635933731,
+          "error_to_jitter": 0.46009194174939694
+        }
+      ],
+      "passing_fraction": 1.0
+    },
+    {
+      "event": 2,
+      "fitted_observations": 64,
+      "blocks": [
+        {
+          "audio_interval_s": [
+            1285.75,
+            1289.75
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.026660905858591377,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": -0.026660905858591377,
+          "error_to_jitter": 0.42657449373746203
+        },
+        {
+          "audio_interval_s": [
+            1301.75,
+            1305.75
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.014576979123887668,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": -0.014576979123887668,
+          "error_to_jitter": 0.23323166598220268
+        },
+        {
+          "audio_interval_s": [
+            1317.75,
+            1321.75
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.020330244880810255,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": 0.020330244880810255,
+          "error_to_jitter": 0.3252839180929641
+        },
+        {
+          "audio_interval_s": [
+            1333.75,
+            1337.75
+          ],
+          "observations": 9,
+          "covered": true,
+          "passes": true,
+          "median_absolute_error_hz": 0.04404206767368635,
+          "local_jitter_floor_hz": 0.0625,
+          "signed_median_error_hz": 0.04404206767368635,
+          "error_to_jitter": 0.7046730827789816
+        }
+      ],
+      "passing_fraction": 1.0
+    }
+  ],
+  "estimated_xyz_m": [
+    4500.0,
+    -4400.0,
+    0.0
+  ],
+  "estimated_clock_offset_s": -66.875,
+  "estimated_pair": "sim-17|sim-41",
+  "inference_wall_s": 8.371,
+  "truth_used_for_inference": false,
+  "truth": {
+    "kind": "synthetic only",
+    "scene": "fresh-southeast",
+    "mode": "positive",
+    "split": "fresh",
+    "seed": 2987,
+    "track_seed": 5783,
+    "stationary_virtual_receiver_xyz_m": [
+      4489.0,
+      -4391.0,
+      0.0
+    ],
+    "clock_offset_s": -66.625,
+    "render_sound_speed_mps": 343.2,
+    "correct_flight_pair": "sim-17|sim-41",
+    "expected_outcome": "point"
+  },
+  "position_error_m": 14.212670403551895,
+  "clock_absolute_error_s": 0.25,
+  "correct_track_pair": true,
+  "expected_behavior_observed": true,
+  "evidence_grade": "conditional_on_supplied_track_catalogue"
+}

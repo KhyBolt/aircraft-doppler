@@ -1,0 +1,50 @@
+# Public file inventory
+
+This list defines the publishable file set. It contains only reviewed source, generated fixtures, and derived evidence. The inventory itself is the final file.
+
+- .gitignore
+- README.md
+- RIGHTS.md
+- aircraft_doppler/__init__.py
+- aircraft_doppler/__main__.py
+- aircraft_doppler/audio.py
+- aircraft_doppler/benchmark.py
+- aircraft_doppler/cli.py
+- aircraft_doppler/corroboration.py
+- aircraft_doppler/demo.py
+- aircraft_doppler/detection.py
+- aircraft_doppler/hardened.py
+- aircraft_doppler/heatmap.py
+- aircraft_doppler/io.py
+- aircraft_doppler/measurement.py
+- aircraft_doppler/physics.py
+- aircraft_doppler/search.py
+- aircraft_doppler/wide.py
+- aircraft_doppler/wide_fixture.py
+- aircraft_doppler/wide_plot.py
+- demo_replay.py
+- evidence/best_per_pair.csv
+- evidence/demo.png
+- evidence/detected_events.json
+- evidence/grid_25m.csv
+- evidence/grid_500m.csv
+- evidence/scorecard.csv
+- evidence/summary.json
+- example/candidates.csv
+- example/synthetic.wav
+- example/tracks.csv
+- example/truth.json
+- fixtures/candidates.csv
+- fixtures/synthetic.wav
+- fixtures/tracks.csv
+- fixtures/truth.json
+- plot_demo.py
+- pyproject.toml
+- requirements-verified.txt
+- tests/test_corroboration.py
+- tests/test_physics.py
+- tests/test_review.py
+- tests/test_scoring.py
+- tests/test_wide.py
+- CHECKSUMS.sha256
+- PUBLIC_FILES.md

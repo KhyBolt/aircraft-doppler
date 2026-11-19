@@ -1,0 +1,25 @@
+suite,case,profile,expectation,decision,position_error_m,correct_track_pair,inference_wall_s,abstention_reasons
+primary,wrong-tracks,v0.3,abstain,False match (4.38 km),4378.382463878641,False,5.198,
+primary,wrong-tracks,v0.4,abstain,Abstained,,,4.485,Event 1 failed locked predictions on withheld audio (0% blocks passed); Event 2 failed locked predictions on withheld audio (25% blocks passed)
+primary,fresh-southeast,v0.3,point,"Correct pair, 14.2 m error",14.212670403551895,True,11.529,
+primary,fresh-southeast,v0.4,point,"Correct pair, 14.2 m error",14.212670403551895,True,8.371,
+primary,fresh-southwest,v0.3,point,"Correct pair, 8.1 m error",8.06225774829855,True,12.514,
+primary,fresh-southwest,v0.4,point,"Correct pair, 8.1 m error",8.06225774829855,True,11.401,
+primary,fresh-northeast,v0.3,point,Abstained,,,6.561,At least one event exceeds the absolute ridge RMSE limit
+primary,fresh-northeast,v0.4,point,Abstained,,,6.512,Near-best sampled points span too wide an area for a single point estimate; Near-tied track pairs do not identify the two sources
+primary,fresh-center,v0.3,point,"Correct pair, 12.6 m error",12.649110640673518,True,9.176,
+primary,fresh-center,v0.4,point,"Correct pair, 12.6 m error",12.649110640673518,True,7.443,
+primary,missing-fresh,v0.3,abstain,Abstained,,,7.976,At least one event exceeds the absolute ridge RMSE limit
+primary,missing-fresh,v0.4,abstain,Abstained,,,6.385,At least one event exceeds the absolute ridge RMSE limit; Event 1 failed locked predictions on withheld audio (0% blocks passed); Event 2 failed locked predictions on withheld audio (0% blocks passed)
+primary,decoy-near,v0.3,abstain,False match (1.09 km),1086.2117657252659,False,13.843,
+primary,decoy-near,v0.4,abstain,Abstained,,,12.639,Event 1 failed locked predictions on withheld audio (25% blocks passed); Event 2 failed locked predictions on withheld audio (0% blocks passed)
+primary,shifted-clock,v0.3,abstain,Abstained,,,14.434,At least one event exceeds the absolute ridge RMSE limit
+primary,shifted-clock,v0.4,abstain,Abstained,,,11.089,At least one event exceeds the absolute ridge RMSE limit; Event 1 failed locked predictions on withheld audio (0% blocks passed); Event 2 failed locked predictions on withheld audio (0% blocks passed)
+primary,ambiguous-fresh,v0.3,abstain,Abstained,,,21.775,Near-best sampled points span too wide an area for a single point estimate
+primary,ambiguous-fresh,v0.4,abstain,Abstained,,,17.356,Near-best sampled points span too wide an area for a single point estimate; Near-tied track pairs do not identify the two sources
+primary,exact-alias,v0.3,abstain,False match (2.51 km),2508.619142077968,False,15.799,
+primary,exact-alias,v0.4,abstain,Abstained,,,11.343,Event 1 failed locked predictions on withheld audio (67% blocks passed)
+primary,no-flyover-fresh,v0.3,abstain,Abstained,,,0.899,Expected two supported descending tones; 0 passed among 5 peaks
+primary,no-flyover-fresh,v0.4,abstain,Abstained,,,0.943,Expected two supported descending tones; 0 passed among 5 peaks
+equivalence stress test,undetectable-alias,v0.3,abstain,False match (2.50 km),2500.498550289522,False,15.125,
+equivalence stress test,undetectable-alias,v0.4,abstain,False match (2.50 km),2500.498550289522,False,12.34,

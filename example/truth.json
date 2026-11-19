@@ -1,0 +1,17 @@
+{
+  "kind": "synthetic only",
+  "scene": "fresh-southeast",
+  "mode": "positive",
+  "split": "fresh",
+  "seed": 2987,
+  "track_seed": 5783,
+  "stationary_virtual_receiver_xyz_m": [
+    4489.0,
+    -4391.0,
+    0.0
+  ],
+  "clock_offset_s": -66.625,
+  "render_sound_speed_mps": 343.2,
+  "correct_flight_pair": "sim-17|sim-41",
+  "expected_outcome": "point"
+}
