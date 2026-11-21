@@ -6,7 +6,9 @@ import unittest
 
 import numpy as np
 
-from aircraft_doppler.result_map import _project, read_scored_grids, write_result_map
+from aircraft_doppler.result_map import (
+    ScoredGrid, _project, read_scored_grids, write_evaluated_grid, write_result_map,
+)
 
 
 def map_data(path):
@@ -16,17 +18,32 @@ def map_data(path):
 
 
 class ResultMapTests(unittest.TestCase):
-    def test_grids_use_only_actual_finite_stage_scores(self):
+    def test_grids_keep_real_scores_and_identify_cached_points(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             (path / "grid_500m.csv").write_text(
                 "x_m,y_m,z_m,loss_hz2\n0,0,0,0.125\n500,0,0,\n")
+            (path / "grid_100m.csv").write_text(
+                "x_m,y_m,z_m,loss_hz2\n0,0,0,0.125\n100,0,0,0.11111111111111113\n")
             (path / "grid_25m.csv").write_text(
-                "x_m,y_m,z_m,loss_hz2\n25,0,0,0.067\n50,0,0,inf\n")
+                "x_m,y_m,z_m,loss_hz2\n0,0,0,0.125\n25,0,0,0.067\n50,0,0,inf\n100,0,0,0.11111111111111113\n")
             grids = read_scored_grids(path)
-            self.assertEqual([spacing for spacing, _ in grids], [500, 25])
-            self.assertEqual([rows.tolist() for _, rows in grids],
-                             [[[0., 0., 0., .125]], [[25., 0., 0., .067]]])
+            self.assertEqual([grid.spacing_m for grid in grids], [500, 100, 25])
+            self.assertEqual(grids[-1].attempted_positions, 4)
+            self.assertEqual(grids[-1].rows.tolist(), [[0., 0., 0., .125], [25., 0., 0., .067],
+                                                     [100., 0., 0., .11111111111111113]])
+            self.assertEqual(grids[-1].first_evaluated_spacing_m.tolist(), [500, 25, 100])
+            origin = [88, 7, 2]
+            out = path / "evaluated-grid.json"
+            write_evaluated_grid(out, grids, {"area_width_m": 10000,
+                                             "area_center_lat_lon_ellipsoid_m": origin})
+            parsed = json.loads(out.read_text())
+            self.assertEqual(parsed["origin_lat_lon_ellipsoid_m"], origin)
+            self.assertEqual(parsed["stages"][-1]["points"],
+                             [[0., 0., 0., .125, 500], [25., 0., 0., .067, 25],
+                              [100., 0., 0., .11111111111111113, 100]])
+            self.assertEqual(parsed["stages"][-1]["footprint_boxes_en_m"],
+                             [[-12.5, -12.5, 37.5, 12.5], [87.5, -12.5, 112.5, 12.5]])
 
     def test_map_tracks_are_selected_and_abstention_never_serializes_a_pin(self):
         segment = "sim-</script><img src=x>"
@@ -44,7 +61,7 @@ class ResultMapTests(unittest.TestCase):
             "estimated_lat_lon": [88.1, 7.1],
         }
         fit = {"best_fit_diagnostic": {"pair": f"{segment}|sim-2", "xyz_m": [975, -1550, 0]}}
-        grid = [(500, np.array([[5000, 0, 0, 0.125]]))]
+        grid = [ScoredGrid(500, np.array([[5000, 0, 0, 0.125]]), np.array([500]), 1)]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             for status in ("supported_under_model", "abstained"):
@@ -59,6 +76,8 @@ class ResultMapTests(unittest.TestCase):
                     self.assertEqual(data["reasons"], reasons)
                     self.assertEqual([track["segment"] for track in data["tracks"]], [segment, "sim-2"])
                     self.assertEqual(data["grid"][0]["mse_hz2"], [0.125])
+                    self.assertEqual(data["grid"][0]["centers_en_m"], [[5000, 0]])
+                    self.assertEqual(data["grid"][0]["first_evaluated_spacing_m"], [500])
                     self.assertEqual(max(corner[0] for corner in data["grid"][0]["cells"][0]), 5000.)
                     if status == "supported_under_model":
                         self.assertEqual(data["receiver"]["lat_lon"], [88.1, 7.1])

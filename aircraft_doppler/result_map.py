@@ -1,6 +1,8 @@
 """Build a self-contained result map from existing guarded solver artifacts."""
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import groupby
 import json
 from pathlib import Path
 
@@ -12,17 +14,70 @@ from .wide import STAGES, SURVEY_M, XYZ
 WORLD_M = 2 * np.pi * 6378137.
 
 
+@dataclass
+class ScoredGrid:
+    spacing_m: int
+    rows: np.ndarray
+    first_evaluated_spacing_m: np.ndarray
+    attempted_positions: int
+
+    def footprint(self, half_width_m):
+        """Return the exact union of scored cells as contiguous east-west strips."""
+        half_cell = self.spacing_m / 2
+        boxes = []
+        by_north = sorted(self.rows[:, [1, 0]].tolist())
+        for north, group in groupby(by_north, key=lambda point: point[0]):
+            east = np.array([point[1] for point in group])
+            breaks = np.flatnonzero(np.diff(east) > self.spacing_m) + 1
+            for run in np.split(east, breaks):
+                boxes.append([max(-half_width_m, run[0] - half_cell),
+                              max(-half_width_m, north - half_cell),
+                              min(half_width_m, run[-1] + half_cell),
+                              min(half_width_m, north + half_cell)])
+        return boxes
+
+
 def read_scored_grids(directory):
-    """Collect only finite values from stage files actually written by the solver."""
+    """Read finite stage scores and identify positions already in the solver's cache."""
     grids = []
+    first_spacing = {}
     for spacing in (SURVEY_M, *(stage[0] for stage in STAGES)):
         path = directory / f"grid_{spacing}m.csv"
-        if path.is_file():
-            rows = pd.read_csv(path, usecols=XYZ + ["loss_hz2"])
-            rows = rows.loc[np.isfinite(rows.loss_hz2), XYZ + ["loss_hz2"]]
-            if len(rows):
-                grids.append((spacing, rows.to_numpy()))
+        if not path.is_file():
+            continue
+        table = pd.read_csv(path, usecols=XYZ + ["loss_hz2"], float_precision="round_trip")
+        rows = table[XYZ + ["loss_hz2"]].to_numpy()
+        original = np.array([first_spacing.setdefault(tuple(point), spacing)
+                             for point in rows[:, :3]], dtype=int)
+        finite = np.isfinite(rows[:, 3])
+        if finite.any():
+            grids.append(ScoredGrid(spacing, rows[finite], original[finite], len(rows)))
     return grids
+
+
+def write_evaluated_grid(path, grids, result):
+    """Save exact ENU centers, training scores, and scored-cell coverage."""
+    if not grids:
+        return
+    half = result["area_width_m"] / 2
+    data = {
+        "coordinate_frame": "East, north, up metres in the local WGS84 tangent plane",
+        "origin_lat_lon_ellipsoid_m": result["area_center_lat_lon_ellipsoid_m"],
+        "search_half_width_m": half,
+        "point_columns": ["east_m", "north_m", "up_m", "min_training_mse_hz2",
+                          "first_evaluated_spacing_m"],
+        "footprint_box_columns": ["min_east_m", "min_north_m", "max_east_m", "max_north_m"],
+        "stages": [{
+            "spacing_m": grid.spacing_m,
+            "attempted_positions": grid.attempted_positions,
+            "points": [list(row) + [first] for row, first in
+                       zip(grid.rows.tolist(), grid.first_evaluated_spacing_m.tolist())],
+            "footprint_boxes_en_m": grid.footprint(half),
+        } for grid in grids],
+    }
+    with path.open("x", encoding="utf-8") as out:
+        json.dump(data, out, separators=(",", ":"), allow_nan=False)
+        out.write("\n")
 
 
 def _project(local, to_lat_lon, center_lon, mercator):
@@ -50,12 +105,19 @@ def write_result_map(path, result, fit, grids, tracks, to_lat_lon):
 
     corners = np.array([[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]])
     layers = []
-    for spacing, rows in grids:
+    for grid in grids:
+        spacing, rows = grid.spacing_m, grid.rows
         cells = rows[:, None, :3] + corners * spacing/2
         cells[:, :, :2] = np.clip(cells[:, :, :2], -half, half)
-        layers.append({"spacing_m": spacing, "mse_hz2": rows[:, 3].tolist(), "cells": project(cells)})
+        mapped_cells = project(cells)
+        extent = np.asarray(mapped_cells).reshape(-1, 2)
+        layers.append({"spacing_m": spacing, "mse_hz2": rows[:, 3].tolist(),
+                       "centers_en_m": rows[:, :2].tolist(),
+                       "first_evaluated_spacing_m": grid.first_evaluated_spacing_m.tolist(),
+                       "bounds": [extent.min(axis=0).tolist(), extent.max(axis=0).tolist()],
+                       "cells": mapped_cells})
     if layers:
-        scores = np.concatenate([rows[:, 3] for _, rows in grids])
+        scores = np.concatenate([grid.rows[:, 3] for grid in grids])
         score_range = [float(scores.min()), float(np.quantile(scores, .95))]
     else:
         score_range = None
@@ -88,6 +150,7 @@ def write_result_map(path, result, fit, grids, tracks, to_lat_lon):
         "projection": "web_mercator" if mercator else "local",
         "local_m_per_map_m": float(np.cos(np.deg2rad(latitude))) if mercator else 1.,
         "grid": layers,
+        "survey_spacing_m": SURVEY_M,
         "score_range": score_range,
         "tracks": paths,
         "receiver": receiver,

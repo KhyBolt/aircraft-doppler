@@ -12,7 +12,7 @@ import pandas as pd
 
 from .io import load_tracks
 from .physics import geodetic_to_ecef
-from .result_map import read_scored_grids, write_result_map
+from .result_map import read_scored_grids, write_evaluated_grid, write_result_map
 from .wide import BudgetExceeded, CLOCK_HALF_S, EDGE_M, SURVEY_M, XYZ, _sha256, infer
 
 
@@ -121,6 +121,7 @@ def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0
     with (output / "inference.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")
+    write_evaluated_grid(output / "evaluated-grid.json", grids, result)
     write_result_map(output / "result-map.html", result, fit, grids, track_geometry,
                      lambda points: _lat_lon(np.asarray(points) @ enu + origin))
     return result

@@ -52,6 +52,9 @@
   .layer { margin: 7px 0; display: flex; gap: 8px; align-items: center; }
   .layer input { accent-color: #79c8a4; margin: 0; }
   .layer-note { font-size: .83rem; color: var(--dim); margin-left: 22px; }
+  .grid-stages { margin: 7px 0 9px 22px; }
+  .grid-stages .layer { margin-bottom: 2px; }
+  .grid-stages small { display: block; margin: 0 0 5px 22px; }
   .ramp { height: 7px; border-radius: 3px; background: linear-gradient(90deg,#e7fa9c,#a4dc84,#52bca1,#35878f,#35536f,#29364f);
           margin: 7px 0 2px 22px; }
   .ramp-scale { display: flex; justify-content: space-between; margin: 0 0 7px 22px; color: var(--dim); font-size: .77rem; }
@@ -82,6 +85,7 @@
       <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
       <button id="reset" type="button">Fit search area</button>
       <button id="fit-tracks" type="button">Fit tracks</button>
+      <button id="fit-refinement" type="button">Fit finest grid</button>
     </div>
     <div class="north" aria-hidden="true">N<br>↑</div>
     <div class="map-footer">
@@ -101,7 +105,10 @@
       <p class="muted" id="boundary-note"></p>
       <label class="layer"><input id="heat" type="checkbox" checked> Sampled fit score</label>
       <div id="heat-note" class="layer-note"></div>
-      <div id="ramp"><div class="ramp"></div><div class="ramp-scale"><span id="ramp-min"></span><span id="ramp-max"></span></div></div>
+      <div id="grid-stages" class="grid-stages"></div>
+      <div id="ramp"><div class="ramp"></div><div class="ramp-scale"><span id="ramp-min"></span><span id="ramp-max"></span></div>
+        <div class="layer-note" id="ramp-scope">Shared color scale</div>
+      </div>
       <label class="layer"><input id="tracks" type="checkbox" checked> Flight paths</label>
       <div id="tracks-note" class="layer-note"></div>
       <ul id="track-legend" class="track-legend"></ul>
@@ -127,6 +134,8 @@ const ctx = canvas.getContext("2d");
 const terrain = byId("terrain");
 const heat = byId("heat");
 const tracks = byId("tracks");
+const stageControls = new Map();
+const finest = [...data.grid].reverse().find(layer => layer.spacing_m < data.survey_spacing_m);
 const trackColors = ["#ffc17c", "#d4b1ff"];
 const palette = ["#e7fa9c", "#a4dc84", "#52bca1", "#35878f", "#35536f", "#29364f"];
 const world = 2 * Math.PI * 6378137;
@@ -173,17 +182,36 @@ function populate() {
     data.per_event_training_rmse_hz.map(value => value.toFixed(3) + " Hz").join(" / "));
 
   setText("boundary-note", "Dashed boundary · " + km(data.area_width_m) + " × " + km(data.area_width_m) + " km search area");
-  const spacing = data.grid.map(layer => layer.spacing_m + " m").join(" / ");
   setText("heat-note", data.grid.length
-    ? spacing + " samples · Minimum training MSE across eligible track pairs (Hz²). Lower fits better. Fit scores are not probabilities or confidence intervals."
+    ? "Minimum training MSE across eligible track pairs (Hz²). Lower fits better. These sampled scores carry no location probability."
     : "Unavailable. No finite grid scores were produced.");
   heat.disabled = !data.grid.length;
   heat.checked = !heat.disabled;
   byId("ramp").hidden = heat.disabled;
   byId("cell-info").hidden = heat.disabled;
-  if (data.score_range) {
-    setText("ramp-min", scoreText(data.score_range[0]) + " Hz²");
-    setText("ramp-max", "≥ " + scoreText(data.score_range[1]) + " Hz²");
+  byId("fit-refinement").disabled = !finest;
+  const stageList = byId("grid-stages");
+  for (const layer of data.grid) {
+    const label = document.createElement("label");
+    label.className = "layer";
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.id = "stage-" + layer.spacing_m;
+    toggle.checked = true;
+    toggle.onchange = clearCell;
+    stageControls.set(layer.spacing_m, toggle);
+    label.append(toggle, document.createTextNode(layer.spacing_m + " m " +
+      (layer.spacing_m === data.survey_spacing_m ? "survey" : "refinement")));
+    const counts = document.createElement("small");
+    const fresh = layer.first_evaluated_spacing_m.filter(spacing => spacing === layer.spacing_m).length;
+    counts.textContent = layer.cells.length.toLocaleString() + " scored · " +
+      (layer.cells.length - fresh).toLocaleString() + " reused";
+    stageList.append(label, counts);
+  }
+  if (!finest && data.grid.length) {
+    const absent = document.createElement("small");
+    absent.textContent = "Refinement scores unavailable.";
+    stageList.append(absent);
   }
 
   const tracksLabel = data.accepted ? "Selected catalogue segments." : "Leading diagnostic pair. Association unverified.";
@@ -231,9 +259,20 @@ function fit(includeTracks) {
       loX = Math.min(loX,x); loY = Math.min(loY,y); hiX = Math.max(hiX,x); hiY = Math.max(hiY,y);
     }
   }
+  fitBounds([[loX,loY],[hiX,hiY]]);
+}
+function fitBounds([[loX,loY],[hiX,hiY]]) {
   view.x = (loX+hiX)/2;
   view.y = (loY+hiY)/2;
   view.scale = Math.min(width/(hiX-loX), height/(hiY-loY)) * .76;
+  drawSoon();
+}
+function visibleHeat() {
+  return heat.checked ? data.grid.filter(layer => stageControls.get(layer.spacing_m).checked) : [];
+}
+function clearCell() {
+  selectedCell = null;
+  setText("cell-info", "Select a heat cell for its score.");
   drawSoon();
 }
 function zoom(factor, x=width/2, y=height/2) {
@@ -312,16 +351,47 @@ function drawTiles() {
     : (pending ? "Loading terrain · offline layers visible" : "Terrain unavailable · offline grid"));
 }
 function drawHeat() {
-  if (!heat.checked || !data.score_range) return;
-  const [base, top] = data.score_range;
-  for (const layer of data.grid) {
-    layer.cells.forEach((cell, index) => {
-      const ratio = top > base ? Math.max(0, (layer.mse_hz2[index]-base)/(top-base)) : 0;
+  const active = visibleHeat();
+  byId("ramp").hidden = !active.length;
+  if (!active.length) return;
+  const [left, upper] = mapPoint(0,0);
+  const [right, lower] = mapPoint(width,height);
+  const onMap = cell => !(cell.every(point => point[0] < left) ||
+    cell.every(point => point[0] > right) || cell.every(point => point[1] < upper) ||
+    cell.every(point => point[1] > lower));
+  const shown = active.map(layer => ({
+    layer, onScreen: layer.cells.reduce((indices,cell,i) => {
+      if (onMap(cell)) indices.push(i);
+      return indices;
+    },[]),
+  }));
+  let [base, top] = data.score_range;
+  let scope = "Shared color scale";
+  if (shown.length === 1) {
+    const [{layer, onScreen}] = shown;
+    if (layer.spacing_m < data.survey_spacing_m && onScreen.length) {
+      const values = onScreen.map(i => layer.mse_hz2[i]).sort((a,b) => a-b);
+      base = values[0];
+      top = values[Math.ceil(.95 * (values.length-1))];
+      scope = "Visible " + layer.spacing_m + " m cells · colors rescale as you zoom";
+    }
+  }
+  setText("ramp-min", scoreText(base) + " Hz²");
+  setText("ramp-max", "≥ " + scoreText(top) + " Hz²");
+  setText("ramp-scope", scope);
+  for (const {layer, onScreen} of shown) {
+    const showEdges = layer.spacing_m < data.survey_spacing_m &&
+      layer.spacing_m * view.scale / data.local_m_per_map_m >= 7;
+    ctx.lineWidth = .65;
+    ctx.strokeStyle = "#15252cb0";
+    for (const i of onScreen) {
+      const ratio = top > base ? Math.max(0, (layer.mse_hz2[i]-base)/(top-base)) : 0;
       const bin = Math.min(palette.length-1, Math.floor(Math.sqrt(ratio)*palette.length));
       ctx.fillStyle = palette[bin] + "bc";
-      stroke(cell,true);
+      stroke(layer.cells[i],true);
       ctx.fill();
-    });
+      if (showEdges) ctx.stroke();
+    }
   }
   if (selectedCell) {
     ctx.strokeStyle = "#fff";
@@ -407,7 +477,7 @@ function resize() {
 function inspectCell(x,y) {
   if (!heat.checked) return;
   const [px,py] = mapPoint(x,y);
-  for (const layer of [...data.grid].reverse()) {
+  for (const layer of visibleHeat().reverse()) {
     for (let i=0; i<layer.cells.length; i++) {
       const cell = layer.cells[i];
       let inside = false;
@@ -417,7 +487,11 @@ function inspectCell(x,y) {
       }
       if (inside) {
         selectedCell = cell;
-        setText("cell-info", layer.spacing_m + " m stage · " + scoreText(layer.mse_hz2[i]) + " Hz²");
+        const [east, north] = layer.centers_en_m[i];
+        const original = layer.first_evaluated_spacing_m[i];
+        const origin = original === layer.spacing_m ? "new in this stage" : "reused from " + original + " m";
+        setText("cell-info", layer.spacing_m + " m stage · " + layer.mse_hz2[i].toPrecision(7) +
+          " Hz² · E " + east + " m, N " + north + " m · " + origin);
         drawSoon();
         return;
       }
@@ -431,7 +505,15 @@ byId("zoom-in").onclick = () => zoom(1.5);
 byId("zoom-out").onclick = () => zoom(1/1.5);
 byId("reset").onclick = () => fit(false);
 byId("fit-tracks").onclick = () => fit(true);
-heat.onchange = tracks.onchange = drawSoon;
+byId("fit-refinement").onclick = () => {
+  if (!finest) return;
+  heat.checked = true;
+  stageControls.get(finest.spacing_m).checked = true;
+  clearCell();
+  fitBounds(finest.bounds);
+};
+heat.onchange = clearCell;
+tracks.onchange = drawSoon;
 terrain.onchange = () => {
   if (terrain.checked) {
     for (const [key,tile] of cache) if (tile.status === "failed") cache.delete(key);

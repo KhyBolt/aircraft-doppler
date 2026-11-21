@@ -57,15 +57,24 @@ the available diagnostic layers, labels any leading track pair as unverified,
 and omits a receiver pin. The JSON still records the reasons and omits
 the estimated position and pair.
 
-The heat grid shows the minimum training ridge MSE (Hz²) at scored positions.
-It does not interpolate between search stages or express a location probability.
+The survey and refinement layers show minimum training ridge MSE (Hz²) at
+the positions the solver actually scored. Toggle each stage separately or
+use **Fit finest grid** and zoom further to inspect individual samples.
+With one refinement layer visible, colors adapt to the visible scores
+and the cell readout keeps the original scale in Hz².
+When finite scores exist, `evaluated-grid.json` saves the exact local
+east, north and up coordinates, loss, stage spacing, first evaluation
+spacing, and clipped scored-cell footprint for each completed stage.
+A reused point keeps its original score. No scores are interpolated, and
+the footprint describes coverage, not location probability or uncertainty.
 The HTML works offline. You can enable USGS topographic tiles in the browser
 when they are available. The offline grid and result layers remain usable
 without them. The HTML contains location and flight geometry, so share it only
 with people who can receive those details.
 
 `--max-seconds` sets the cooperative search budget. Decoding and input
-preparation can also take time.
+preparation can also take time. After a timeout only completed scored
+stages are exported.
 
 Intake was verified with synthetic PCM WAV, MP3, and MP4 with AAC. The
 same synthetic flight pair and 14.2 m error were measured for each format.
