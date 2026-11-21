@@ -1,30 +1,89 @@
-# Aircraft Doppler: a reproducible synthetic demo
+# Aircraft Audio Geolocation
 
-Can two Doppler signatures in one long recording constrain the position of a
-stationary virtual microphone? This example starts from a **27-minute
-synthetic WAV**, a **10 × 10 km** search area, and an unknown recording clock
-offset of **±80 seconds**. It identifies two tone ridges about **15 minutes**
-apart and ranks matches against eight simulated tracks, including decoys.
+Aircraft Doppler signatures can constrain where a recording was made.
+This project detects descending tone ridges, compares them with flight
+tracks, and can abstain when the available evidence is too weak.
 
-![Wide synthetic run: sampled grid and two Doppler signatures](evidence/demo.png)
+## Install
 
-## Replay the exact files
+Use Python 3.12 with the versions pinned for validation. Run the commands
+from the repository root.
 
-Use Python 3.12 with the pinned dependencies used for validation.
-
-```sh
-python -m venv .venv
+~~~sh
+python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-verified.txt
+~~~
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`.
+PCM WAV works directly. Install FFmpeg on PATH for MP3, compressed WAV,
+and video such as MP4.
+
+## Analyze a local recording
+
+The experimental `locate` command looks for two separated flyovers in a
+recording you made or have permission to analyze. Supply a regional
+civilian flight catalogue, an approximate UTC time for the first decoded
+audio sample, and the center and receiver ellipsoid height of a flat
+10 × 10 km search area.
+
+~~~sh
+python -m aircraft_doppler locate \
+  --audio recording.mp4 --tracks regional.csv \
+  --start-utc 2024-04-07T16:34:18Z \
+  --area-center LAT LON ELLIPSOID_HEIGHT_M \
+  --output runs/local
+~~~
+
+The search allows ±80 seconds around the supplied audio start. If a
+video's audio starts later than its picture, use the audio start. The
+decoder uses the first audio stream and channel 0 by default. Set
+`--channel` to choose a different channel within that stream.
+
+Prepare a local CSV with
+`flight_id,time_s,latitude,longitude,altitude_ellipsoid_m`. Use Unix UTC
+seconds and WGS84 ellipsoid metres. Split tracks at gaps over 15 seconds,
+give each segment a unique `flight_id`, and use `aircraft_id` to link
+segments of the same airframe. The optional `engine` column accepts
+`propeller`, `jet`, or `unknown`. The command runs offline.
+
+The output directory must be new or empty. Exit 0 reports an estimate that
+passed the model's checks. Exit 2 covers abstention or invalid input.
+A completed run writes `runs/local/inference.json` and
+`runs/local/result-map.html`. Open the HTML in a browser to pan, zoom, and
+inspect the search boundary, sampled fit scores, and selected flight paths.
+An accepted run marks the predicted receiver. On abstention, the map shows
+the available diagnostic layers, labels any leading track pair as unverified,
+and omits a receiver pin. The JSON still records the reasons and omits
+the estimated position and pair.
+
+The heat grid shows the minimum training ridge MSE (Hz²) at scored positions.
+It does not interpolate between search stages or express a location probability.
+The HTML works offline. You can enable USGS topographic tiles in the browser
+when they are available. The offline grid and result layers remain usable
+without them. The HTML contains location and flight geometry, so share it only
+with people who can receive those details.
+
+`--max-seconds` sets the cooperative search budget. Decoding and input
+preparation can also take time.
+
+Intake was verified with synthetic PCM WAV, MP3, and MP4 with AAC. The
+same synthetic flight pair and 14.2 m error were measured for each format.
+The video-without-audio, single-flyover, missing-coverage, shifted-clock,
+and wrong-geometry controls produced no estimate.
+
+## Replay the synthetic benchmark
+
+The bundled run searches eight simulated tracks with two flyovers about
+15 minutes apart in a 27-minute WAV. It uses the same 10 × 10 km search
+area and ±80 s recording clock prior.
+
+~~~sh
 python demo_replay.py --output runs/exact-demo
-```
+python plot_demo.py --result runs/exact-demo --output runs/exact-demo.png
+~~~
 
-On Windows, activate the environment with .venv\Scripts\Activate.ps1. The
-replay runs offline after dependencies are installed. It reads only
-[synthetic.wav](example/synthetic.wav), [tracks.csv](example/tracks.csv), and
-[candidates.csv](example/candidates.csv); it does not read the answer.
-
-Expected result:
+![Synthetic search grid and two Doppler signatures](evidence/demo.png)
 
 | Quantity | Guarded v0.4 replay |
 | --- | --- |
@@ -32,51 +91,45 @@ Expected result:
 | Virtual track pair | sim-17 and sim-41 |
 | Inferred recording offset | −66.875 s |
 | Audio-derived event separation | 903.874 s |
-| Distance to known synthetic truth | 14.2 m |
+| Distance to synthetic reference | 14.2 m |
 
-To regenerate the image after replay, run: 
+Inference reads the [WAV](example/synthetic.wav),
+[tracks](example/tracks.csv), and [candidate grid](example/candidates.csv).
+The [synthetic reference](example/truth.json) is used afterward to measure
+error. See the [saved result](evidence/summary.json) and
+[measured traces](evidence/detected_events.json).
 
-`python plot_demo.py --result runs/exact-demo --output runs/exact-demo.png`.
+The detector uses the full WAV to pick ridges. The guarded fit shares one
+clock offset across both passes and checks its locked predictions on
+withheld ridge observations. The plot shows sampled search scores.
 
-Inspect the [recorded summary](evidence/summary.json),
-[measured traces](evidence/detected_events.json), and
-[expected ground truth](example/truth.json). The runner estimates position
-and timing; the error in the table is calculated afterward. The WAV is
-downsampled mono PCM for the low-frequency benchmark. Use the Raw/Download
-button if your browser does not preview it.
-
-Regenerate the same fixture and compare both profiles on it, or run the full
-paired suite:
-
-```sh
+~~~sh
 python -m aircraft_doppler.hardened --case fresh-southeast --output runs/paired-example
 python -m aircraft_doppler.hardened --output runs/paired-suite
 python -m unittest discover -s tests -v
-```
+~~~
 
-## What the comparison showed
+Both profiles accepted 3 of 4 unseen synthetic positives with 8.1–14.2 m
+error. False accepts fell from 4 of 8 to 1 of 8 across the seven primary
+controls and the exact-equivalence case. In that last case, a translated
+catalogue created the same acoustic pattern and still produced a false
+accept. The [scorecard](evidence/scorecard.csv) records all outcomes.
 
-Both profiles accepted the same **3 of 4** previously unseen synthetic
-positive cases (8.1–14.2 m error). Across the primary seven controls and the
-separately constructed exact-equivalence challenge, false accepts fell from
-**4 of 8** to **1 of 8**. The v0.4 checks stopped a 4.38 km wrong-track match
-and a 1.09 km near-decoy match. The exact-equivalence challenge still failed:
-if the true tracks are missing and a translated catalogue generates the very
-same audio pattern, the sound cannot tell the two locations apart.
-
-The profile requires the tracks to span each measured event, fits one
-shared recording offset across the two passages, and checks the locked fit
-on temporally withheld ridge observations. The detector still looks at
-the full WAV to select the ridges. The spatial map displays tested cells,
-not probabilities. This is a **synthetic demonstration**, not a field
-accuracy claim or direct benchmark against other projects.
-
-See the [complete scorecard](evidence/scorecard.csv) and
-[provenance](RIGHTS.md).
-
-## Real-recording replay
+## Field recordings
 
 The [Eclipse Soundscapes 505 benchmark](benchmarks/eclipse-505-protocol.md)
-replays the solver on licensed field audio and historical ADS-B tracks. It
-includes the registered clip, a longer window, a disjoint same-station
-comparison, two negative controls, and a separately scored station reference.
+documents an executable replay on licensed audio and historical tracks.
+All completed arms abstained.
+
+The saved [Livermore diagnostic](https://khybolt.github.io/doppler/#livermore)
+used two public research WAVs, their exact relative start gap, a date, and
+a 10 × 10 km prior. The matching pair ranked first of 17,101. The leading
+estimate was 321 m from the study-reported phone position. The verifier
+abstained after the second pass failed its held-out checks. The reference
+has no independent survey bound.
+
+The [Livermore input guide](benchmarks/livermore-inputs.md) verifies the
+original WAVs and archive receipts. Recomputing the saved result requires
+the private solver and clock-screen revisions and the exact run hook.
+
+[Source and data credits](RIGHTS.md)

@@ -25,3 +25,20 @@ under [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/). The
 the exact regional flight cut from the public release. The field figure uses
 the public-domain [USGS The National Map topo service](https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer)
 and depicts derived spectral intensity and sampled fit residuals.
+
+The standalone result map uses caller-supplied geometry and derived solver scores.
+Its optional browser basemap comes from the same USGS topographic tile service.
+No basemap tiles are bundled or fetched by the CLI.
+
+The [Livermore input verifier](benchmarks/livermore-inputs.md) acquires the
+two original WAVs from Praveen Pathak, *Aeroplane data full analysis and
+raw files*, v2 [Zenodo 24075029](https://doi.org/10.5281/zenodo.24075029),
+under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It also
+checks historical rows attributed to [adsb.lol contributors](https://www.adsb.lol/docs/open-data/historical)
+under [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) via
+the [adsb.exposed public index](https://github.com/ClickHouse/adsb.exposed#data-source).
+The repo contains an acquisition and verification recipe and aggregate
+checksums. The clips are downloaded into the ignored `runs/` directory.
+The checker emits only track counts and checksums. The linked
+DopplerTrack result is a separate comparator with supplied tracks and
+timing, credited in the input guide.

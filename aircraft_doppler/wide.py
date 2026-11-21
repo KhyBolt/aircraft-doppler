@@ -236,7 +236,7 @@ def _grid(points, score_table):
     return table.merge(per_point,on=XYZ,how="left",validate="1:1")
 
 
-def infer(audio_path, tracks_path, points_path, output, *, deadline=None, hardened=False):
+def infer(audio_path, tracks_path, points_path, output, *, deadline=None, hardened=False, channel=0):
     """Inference receives no scene ID, source frequencies, event picks, or truth."""
     start = perf_counter()
     output = Path(output)
@@ -251,7 +251,7 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
         _write_json(output/"inference.json",report)
         return report
 
-    sr,audio = read_audio(paths["wav"])
+    sr,audio = read_audio(paths["wav"], channel=channel)
     report["recording_duration_s"] = len(audio)/sr
     spec = make_spectrogram(audio,sr,**STFT_SETTINGS)
     del audio

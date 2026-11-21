@@ -17,3 +17,6 @@ aircraft-doppler = "aircraft_doppler.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["aircraft_doppler*"]
+
+[tool.setuptools.package-data]
+aircraft_doppler = ["result_map.html"]

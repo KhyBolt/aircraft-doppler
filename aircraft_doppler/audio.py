@@ -37,19 +37,44 @@ class Spectrogram:
                                        bounds_error=False, fill_value=np.nan)
 
 
+def _decode_media(path):
+    """Decode the first audio stream without downmixing or changing its rate."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "decoded.wav"
+        command = ["ffmpeg", "-nostdin", "-hide_banner", "-v", "error", "-xerror",
+                   "-protocol_whitelist", "file", "-i", str(path.resolve()),
+                   "-map", "0:a:0", "-c:a", "pcm_f32le", str(out)]
+        try:
+            subprocess.run(command, check=True, stderr=subprocess.PIPE)
+        except FileNotFoundError as exc:
+            raise ValueError("FFmpeg is required to decode this media. Install ffmpeg or use a PCM WAV.") from exc
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.decode("utf-8", errors="replace").strip()
+            if "matches no streams" in detail or "does not match any streams" in detail:
+                raise ValueError(f"No audio stream in {path}") from exc
+            hint = detail.splitlines()[-1] if detail else "unknown decode error"
+            raise ValueError(f"FFmpeg could not decode the first audio stream in {path}: {hint}") from exc
+        return wavfile.read(out)
+
+
 def read_audio(path, target_rate=2000, channel=0):
-    """Select one channel to avoid cancellation when downmixing stereo."""
+    """Read PCM WAV directly, or use FFmpeg for the first media audio stream."""
     path = Path(path)
     if not isinstance(target_rate, (int, np.integer)) or target_rate < 1:
         raise ValueError("Target sample rate must be a positive integer")
     if not isinstance(channel, (int, np.integer)) or channel < 0:
         raise ValueError("Audio channel must be a nonnegative integer")
-    if path.suffix.lower() != ".wav":
-        with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp)/"decoded.wav"
-            subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(path.resolve()), "-vn", "-c:a", "pcm_f32le", str(out)], check=True)
-            return read_audio(out, target_rate, channel)
-    sr, x = wavfile.read(path)
+    if not path.is_file():
+        raise ValueError(f"Audio input file does not exist or is not a regular file: {path}")
+    if path.suffix.lower() == ".wav":
+        try:
+            sr, x = wavfile.read(path)
+        except (ValueError, EOFError):
+            sr, x = _decode_media(path)
+    else:
+        sr, x = _decode_media(path)
+    if not len(x):
+        raise ValueError(f"Audio stream contains no samples: {path}")
     if x.ndim == 1 and channel != 0:
         raise ValueError("Only channel 0 exists in mono audio")
     if x.ndim > 1:

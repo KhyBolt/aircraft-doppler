@@ -15,9 +15,12 @@ This list defines the publishable file set. It contains only reviewed source, ge
 - aircraft_doppler/detection.py
 - aircraft_doppler/hardened.py
 - aircraft_doppler/heatmap.py
+- aircraft_doppler/intake.py
 - aircraft_doppler/io.py
 - aircraft_doppler/measurement.py
 - aircraft_doppler/physics.py
+- aircraft_doppler/result_map.html
+- aircraft_doppler/result_map.py
 - aircraft_doppler/search.py
 - aircraft_doppler/wide.py
 - aircraft_doppler/wide_fixture.py
@@ -25,6 +28,9 @@ This list defines the publishable file set. It contains only reviewed source, ge
 - benchmarks/crop_adsb.py
 - benchmarks/eclipse-505-protocol.md
 - benchmarks/eclipse_replay.py
+- benchmarks/livermore-inputs.md
+- benchmarks/livermore_archive.py
+- benchmarks/livermore_inputs.py
 - benchmarks/plot_eclipse.py
 - benchmarks/range_wav.py
 - demo_replay.py
@@ -49,8 +55,10 @@ This list defines the publishable file set. It contains only reviewed source, ge
 - pyproject.toml
 - requirements-verified.txt
 - tests/test_corroboration.py
+- tests/test_intake.py
 - tests/test_physics.py
 - tests/test_review.py
+- tests/test_result_map.py
 - tests/test_scoring.py
 - tests/test_wide.py
 - CHECKSUMS.sha256

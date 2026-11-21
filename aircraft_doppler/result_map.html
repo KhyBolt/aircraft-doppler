@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aircraft Audio Geolocation · Result map</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #edf4f5;
+    --dim: #a7b8bd;
+    --panel: #17242a;
+    --border: #35454b;
+    --mint: #91e2bc;
+    --amber: #ffd195;
+    font: 15px/1.55 system-ui, sans-serif;
+    color: var(--ink);
+    background: #101a1f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  header { max-width: 1560px; margin: auto; padding: 24px 28px 18px; }
+  h1 { margin: 0; font-size: clamp(25px, 3vw, 40px); line-height: 1.15; letter-spacing: -.04em; }
+  header p { margin: 7px 0 0; color: var(--dim); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px;
+         padding: 0 28px 28px; max-width: 1560px; margin: auto; align-items: start; }
+  .map, .panel { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+  .map { min-width: 0; overflow: hidden; background: #111f25; }
+  canvas { width: 100%; height: clamp(450px, 73vh, 960px); display: block; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  canvas:focus-visible { outline: 2px solid var(--mint); outline-offset: -3px; }
+  .toolbar { position: absolute; top: 14px; left: 14px; display: flex; flex-wrap: wrap; gap: 6px; right: 43px; }
+  button { color: var(--ink); background: #1a2a31; border: 1px solid #46585e; border-radius: 7px; padding: 7px 10px; font: inherit; cursor: pointer; }
+  button:hover { background: #203a43; }
+  button:disabled { opacity: .48; cursor: default; }
+  button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+  .north { position: absolute; top: 15px; right: 15px; color: #e3eef0; text-shadow: 0 1px 3px #000;
+           text-align: center; line-height: 1.15; font-size: 12px; pointer-events: none; }
+  .map-footer { display: flex; justify-content: space-between; gap: 12px; color: var(--dim); padding: 9px 13px; border-top: 1px solid var(--border); font-size: .82rem; }
+  aside { display: grid; gap: 12px; }
+  .panel { padding: 15px 16px; }
+  h2 { font-size: 1rem; margin: 0 0 8px; }
+  p { margin: 7px 0; }
+  .muted, small { color: var(--dim); }
+  .status { display: flex; align-items: center; gap: 8px; }
+  .status::before { content: ""; display: block; width: 8px; height: 8px; border-radius: 100%; background: var(--amber); }
+  .status.supported::before { background: var(--mint); }
+  .reasons { margin: 7px 0 0; padding-left: 18px; color: #e7cfb5; font-size: .9rem; }
+  .detail { margin-top: 8px; display: grid; }
+  .detail b { font-size: .84rem; }
+  .detail span { color: var(--dim); font-size: .84rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .layer { margin: 7px 0; display: flex; gap: 8px; align-items: center; }
+  .layer input { accent-color: #79c8a4; margin: 0; }
+  .layer-note { font-size: .83rem; color: var(--dim); margin-left: 22px; }
+  .ramp { height: 7px; border-radius: 3px; background: linear-gradient(90deg,#e7fa9c,#a4dc84,#52bca1,#35878f,#35536f,#29364f);
+          margin: 7px 0 2px 22px; }
+  .ramp-scale { display: flex; justify-content: space-between; margin: 0 0 7px 22px; color: var(--dim); font-size: .77rem; }
+  .track-legend { padding: 0; list-style: none; margin: 6px 0 10px 22px; font-size: .84rem; }
+  .track-legend li { margin: 5px 0; overflow-wrap: anywhere; }
+  .track-legend span { display: inline-block; width: 13px; height: 3px; margin: 0 6px 3px 0; }
+  .track-legend small { display: block; margin-left: 19px; }
+  details summary { cursor: pointer; }
+  a { color: #a9ded6; }
+  [hidden] { display: none !important; }
+  @media (max-width: 760px) {
+    main { grid-template-columns: minmax(0, 1fr); padding: 0 14px 14px; }
+    header { padding: 18px 14px 14px; }
+    canvas { height: 56vh; min-height: 340px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Aircraft Audio Geolocation</h1>
+  <p>Flight paths and sampled receiver fit</p>
+</header>
+<main>
+  <section class="map" aria-label="Result map">
+    <canvas id="map" tabindex="0" aria-label="Interactive result map. Use arrow keys to pan and plus or minus to zoom."></canvas>
+    <div class="toolbar">
+      <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <button id="reset" type="button">Fit search area</button>
+      <button id="fit-tracks" type="button">Fit tracks</button>
+    </div>
+    <div class="north" aria-hidden="true">N<br>↑</div>
+    <div class="map-footer">
+      <span id="terrain-status" role="status">Offline grid</span>
+      <span id="cell-info">Select a heat cell for its score.</span>
+    </div>
+  </section>
+  <aside>
+    <section class="panel" aria-labelledby="assessment">
+      <h2 class="status" id="assessment"></h2>
+      <p id="assessment-note" class="muted"></p>
+      <ul class="reasons" id="reasons"></ul>
+      <div id="run-details"></div>
+    </section>
+    <section class="panel" aria-labelledby="layers">
+      <h2 id="layers">Map layers</h2>
+      <p class="muted" id="boundary-note"></p>
+      <label class="layer"><input id="heat" type="checkbox" checked> Sampled fit score</label>
+      <div id="heat-note" class="layer-note"></div>
+      <div id="ramp"><div class="ramp"></div><div class="ramp-scale"><span id="ramp-min"></span><span id="ramp-max"></span></div></div>
+      <label class="layer"><input id="tracks" type="checkbox" checked> Flight paths</label>
+      <div id="tracks-note" class="layer-note"></div>
+      <ul id="track-legend" class="track-legend"></ul>
+      <label class="layer"><input id="terrain" type="checkbox"> USGS topographic basemap</label>
+      <p class="layer-note" id="terrain-note">Optional tiles load in the browser. <a href="https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer" rel="noreferrer">USGS The National Map</a></p>
+    </section>
+    <section class="panel" aria-label="Provenance">
+      <details>
+        <summary>Run provenance</summary>
+        <div id="provenance"></div>
+      </details>
+    </section>
+  </aside>
+</main>
+<noscript>The result map requires browser JavaScript. The inference.json output contains the model decision.</noscript>
+<script type="application/json" id="result-data">__RESULT_DATA__</script>
+<script>
+"use strict";
+const byId = id => document.getElementById(id);
+const data = JSON.parse(byId("result-data").textContent);
+const canvas = byId("map");
+const ctx = canvas.getContext("2d");
+const terrain = byId("terrain");
+const heat = byId("heat");
+const tracks = byId("tracks");
+const trackColors = ["#ffc17c", "#d4b1ff"];
+const palette = ["#e7fa9c", "#a4dc84", "#52bca1", "#35878f", "#35536f", "#29364f"];
+const world = 2 * Math.PI * 6378137;
+const tileBase = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile";
+const cache = new Map();
+const view = {x: 0, y: 0, scale: 1};
+let width, height, pixelRatio, frame, drag;
+let selectedCell = null;
+
+function addDetail(parent, label, value) {
+  const row = document.createElement("div");
+  row.className = "detail";
+  const key = document.createElement("b");
+  key.textContent = label;
+  const text = document.createElement("span");
+  text.textContent = value;
+  row.append(key, text);
+  parent.append(row);
+}
+function setText(id, value) {
+  const node = byId(id);
+  if (node.textContent !== value) node.textContent = value;
+}
+const scoreText = value => value.toPrecision(4);
+const km = value => (value / 1000).toLocaleString(undefined, {maximumFractionDigits: 2});
+
+function populate() {
+  setText("assessment", data.accepted ? "Estimate supported" : "Location abstained");
+  byId("assessment").classList.toggle("supported", data.accepted);
+  setText("assessment-note", data.accepted
+    ? "Conditional on the supplied track catalogue and the model’s checks."
+    : "Diagnostic view. No predicted receiver was accepted.");
+  for (const reason of data.reasons) {
+    const li = document.createElement("li");
+    li.textContent = reason;
+    byId("reasons").append(li);
+  }
+  const details = byId("run-details");
+  if (data.receiver) addDetail(details, "Predicted receiver",
+    data.receiver.lat_lon.map(value => value.toFixed(5) + "°").join(", "));
+  if (data.sampled_near_best_span_m) addDetail(details, "Near-best sampled span",
+    data.sampled_near_best_span_m.map(value => value.toFixed(0) + " m").join(" east × ") + " north");
+  if (data.per_event_training_rmse_hz) addDetail(details, "Training RMSE by ridge",
+    data.per_event_training_rmse_hz.map(value => value.toFixed(3) + " Hz").join(" / "));
+
+  setText("boundary-note", "Dashed boundary · " + km(data.area_width_m) + " × " + km(data.area_width_m) + " km search area");
+  const spacing = data.grid.map(layer => layer.spacing_m + " m").join(" / ");
+  setText("heat-note", data.grid.length
+    ? spacing + " samples · Minimum training MSE across eligible track pairs (Hz²). Lower fits better. Fit scores are not probabilities or confidence intervals."
+    : "Unavailable. No finite grid scores were produced.");
+  heat.disabled = !data.grid.length;
+  heat.checked = !heat.disabled;
+  byId("ramp").hidden = heat.disabled;
+  byId("cell-info").hidden = heat.disabled;
+  if (data.score_range) {
+    setText("ramp-min", scoreText(data.score_range[0]) + " Hz²");
+    setText("ramp-max", "≥ " + scoreText(data.score_range[1]) + " Hz²");
+  }
+
+  const tracksLabel = data.accepted ? "Selected catalogue segments." : "Leading diagnostic pair. Association unverified.";
+  setText("tracks-note", data.tracks.length
+    ? tracksLabel + (data.tracks.length < 2 ? " One track is unavailable." : "")
+    : "Unavailable. The run did not identify a usable track pair.");
+  tracks.disabled = !data.tracks.length;
+  tracks.checked = !tracks.disabled;
+  byId("fit-tracks").disabled = tracks.disabled;
+  data.tracks.forEach((track, index) => {
+    const row = document.createElement("li");
+    const swatch = document.createElement("span");
+    swatch.style.background = trackColors[index];
+    const interval = document.createElement("small");
+    interval.textContent = track.start_utc + " to " + track.end_utc;
+    row.append(swatch, document.createTextNode(track.segment), interval);
+    byId("track-legend").append(row);
+  });
+  if (data.projection === "local") {
+    terrain.disabled = true;
+    setText("terrain-note", "Unavailable in the local polar projection. The offline map remains available.");
+  }
+  const provenance = byId("provenance");
+  addDetail(provenance, "Supplied recording start", data.clock_anchor + " · ±" + data.clock_half_width_s + " s");
+  addDetail(provenance, "Detected ridges", data.audio_ridges === null ? "Unavailable" : data.audio_ridges);
+  addDetail(provenance, "Track source", "Supplied catalogue · " + data.catalogue_segments + " segments");
+  for (const [source, hash] of Object.entries(data.fingerprints)) {
+    addDetail(provenance, source === "audio" ? "Audio SHA-256" : "Track catalogue SHA-256", hash);
+  }
+}
+function drawSoon() {
+  if (frame === undefined) frame = requestAnimationFrame(draw);
+}
+function screen(point) {
+  return [(point[0]-view.x)*view.scale + width/2, (point[1]-view.y)*view.scale + height/2];
+}
+function mapPoint(x, y) {
+  return [view.x + (x-width/2)/view.scale, view.y + (y-height/2)/view.scale];
+}
+function fit(includeTracks) {
+  let loX = Infinity, loY = Infinity, hiX = -Infinity, hiY = -Infinity;
+  const lines = includeTracks ? [data.boundary, ...data.tracks.map(track => track.coordinates)] : [data.boundary];
+  for (const line of lines) {
+    for (const [x,y] of line) {
+      loX = Math.min(loX,x); loY = Math.min(loY,y); hiX = Math.max(hiX,x); hiY = Math.max(hiY,y);
+    }
+  }
+  view.x = (loX+hiX)/2;
+  view.y = (loY+hiY)/2;
+  view.scale = Math.min(width/(hiX-loX), height/(hiY-loY)) * .76;
+  drawSoon();
+}
+function zoom(factor, x=width/2, y=height/2) {
+  const [beforeX, beforeY] = mapPoint(x,y);
+  view.scale = Math.max(.000003, Math.min(10, view.scale * factor));
+  const [afterX, afterY] = mapPoint(x,y);
+  view.x += beforeX - afterX;
+  view.y += beforeY - afterY;
+  drawSoon();
+}
+function stroke(points, closed=false) {
+  ctx.beginPath();
+  points.forEach((point, index) => ctx[index ? "lineTo" : "moveTo"](...screen(point)));
+  if (closed) ctx.closePath();
+}
+function backdrop() {
+  ctx.fillStyle = "#111f25";
+  ctx.fillRect(0,0,width,height);
+  if (!terrain.checked) {
+    setText("terrain-status", "Offline grid");
+  } else {
+    drawTiles();
+  }
+  const units = 10 ** Math.floor(Math.log10(110/view.scale));
+  const [left, top] = mapPoint(0,0);
+  const [right, bottom] = mapPoint(width,height);
+  ctx.strokeStyle = "#c6e4ee22";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = Math.ceil(left/units)*units; x < right; x += units) {
+    const [px] = screen([x,top]);
+    ctx.moveTo(px,0); ctx.lineTo(px,height);
+  }
+  for (let y = Math.ceil(top/units)*units; y < bottom; y += units) {
+    const [,py] = screen([left,y]);
+    ctx.moveTo(0,py); ctx.lineTo(width,py);
+  }
+  ctx.stroke();
+}
+function drawTiles() {
+  const level = Math.max(0, Math.min(16, Math.round(Math.log2(view.scale*world/256))));
+  const count = 2 ** level;
+  const size = world / count;
+  const [left, top] = mapPoint(0,0);
+  const [right, bottom] = mapPoint(width,height);
+  let ready = 0, pending = 0, failed = 0;
+  ctx.globalAlpha = .68;
+  for (let y = Math.max(0, Math.floor(top/size)); y <= Math.min(count-1, Math.floor(bottom/size)); y++) {
+    for (let x = Math.floor(left/size); x <= Math.floor(right/size); x++) {
+      const key = [level, y, (x%count+count)%count].join("/");
+      if (!cache.has(key) && !drag) {
+        if (cache.size >= 96) cache.delete(cache.keys().next().value);
+        const image = new Image();
+        const entry = {image, status: "pending"};
+        cache.set(key, entry);
+        image.referrerPolicy = "no-referrer";
+        image.onload = () => { entry.status = "ready"; drawSoon(); };
+        image.onerror = () => { entry.status = "failed"; drawSoon(); };
+        image.src = tileBase + "/" + key;
+      }
+      const tile = cache.get(key);
+      if (!tile || tile.status === "pending") {
+        pending++;
+      } else if (tile.status === "ready") {
+        ready++;
+        const [px,py] = screen([x*size,y*size]);
+        ctx.drawImage(tile.image,px,py,size*view.scale + .5,size*view.scale + .5);
+      } else {
+        failed++;
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  setText("terrain-status", ready
+    ? (failed ? "Partial USGS terrain · offline grid fills gaps" : "USGS The National Map")
+    : (pending ? "Loading terrain · offline layers visible" : "Terrain unavailable · offline grid"));
+}
+function drawHeat() {
+  if (!heat.checked || !data.score_range) return;
+  const [base, top] = data.score_range;
+  for (const layer of data.grid) {
+    layer.cells.forEach((cell, index) => {
+      const ratio = top > base ? Math.max(0, (layer.mse_hz2[index]-base)/(top-base)) : 0;
+      const bin = Math.min(palette.length-1, Math.floor(Math.sqrt(ratio)*palette.length));
+      ctx.fillStyle = palette[bin] + "bc";
+      stroke(cell,true);
+      ctx.fill();
+    });
+  }
+  if (selectedCell) {
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    stroke(selectedCell,true);
+    ctx.stroke();
+  }
+}
+function drawReceiver() {
+  if (!data.receiver) return;
+  const [x,y] = screen(data.receiver.coordinates);
+  ctx.fillStyle = "#f6f5ec";
+  ctx.strokeStyle = "#16252d";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x,y);
+  ctx.lineTo(x-6,y-10);
+  ctx.arc(x,y-15,8,2.52,.62);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#20313b";
+  ctx.beginPath();
+  ctx.arc(x,y-15,3,0,2*Math.PI);
+  ctx.fill();
+  const label = "Predicted receiver";
+  ctx.font = "600 12px system-ui";
+  const box = ctx.measureText(label).width + 16;
+  const tx = x + box + 14 < width ? x + 12 : x - box - 12;
+  ctx.fillRect(tx,y-27,box,20);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label,tx+8,y-13);
+}
+function drawScale() {
+  const nominal = 110 * data.local_m_per_map_m / view.scale;
+  const order = 10 ** Math.floor(Math.log10(nominal));
+  const length = [5,2,1].find(value => value*order <= nominal) * order;
+  const bar = length * view.scale / data.local_m_per_map_m;
+  ctx.fillStyle = "#16252d";
+  ctx.fillRect(14,height-37,bar+22,25);
+  ctx.fillStyle = "#e1eef3";
+  ctx.fillRect(24,height-20,bar,2);
+  ctx.font = "11px system-ui";
+  ctx.fillText(length >= 1000 ? km(length) + " km" : length + " m",24,height-24);
+}
+function draw() {
+  frame = undefined;
+  ctx.setTransform(pixelRatio,0,0,pixelRatio,0,0);
+  backdrop();
+  drawHeat();
+  stroke(data.boundary,true);
+  ctx.setLineDash([7,5]);
+  ctx.strokeStyle = "#111e25";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.strokeStyle = "#e4f1f3";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (tracks.checked) {
+    data.tracks.forEach((track,index) => {
+      stroke(track.coordinates);
+      ctx.strokeStyle = "#0d171d";
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      ctx.strokeStyle = trackColors[index];
+      ctx.lineWidth = 2.6;
+      ctx.stroke();
+    });
+  }
+  drawReceiver();
+  drawScale();
+}
+function resize() {
+  const box = canvas.getBoundingClientRect();
+  const first = width === undefined;
+  width = box.width; height = box.height;
+  pixelRatio = Math.min(devicePixelRatio || 1,2);
+  canvas.width = Math.round(width*pixelRatio);
+  canvas.height = Math.round(height*pixelRatio);
+  if (first) fit(false); else drawSoon();
+}
+function inspectCell(x,y) {
+  if (!heat.checked) return;
+  const [px,py] = mapPoint(x,y);
+  for (const layer of [...data.grid].reverse()) {
+    for (let i=0; i<layer.cells.length; i++) {
+      const cell = layer.cells[i];
+      let inside = false;
+      for (let j=0,k=cell.length-1; j<cell.length; k=j++) {
+        const [x1,y1] = cell[j], [x2,y2] = cell[k];
+        if ((y1>py) !== (y2>py) && px < (x2-x1)*(py-y1)/(y2-y1)+x1) inside = !inside;
+      }
+      if (inside) {
+        selectedCell = cell;
+        setText("cell-info", layer.spacing_m + " m stage · " + scoreText(layer.mse_hz2[i]) + " Hz²");
+        drawSoon();
+        return;
+      }
+    }
+  }
+  selectedCell = null;
+  setText("cell-info", "No scored cell here");
+  drawSoon();
+}
+byId("zoom-in").onclick = () => zoom(1.5);
+byId("zoom-out").onclick = () => zoom(1/1.5);
+byId("reset").onclick = () => fit(false);
+byId("fit-tracks").onclick = () => fit(true);
+heat.onchange = tracks.onchange = drawSoon;
+terrain.onchange = () => {
+  if (terrain.checked) {
+    for (const [key,tile] of cache) if (tile.status === "failed") cache.delete(key);
+  }
+  drawSoon();
+};
+canvas.addEventListener("wheel", event => {
+  event.preventDefault();
+  zoom(Math.exp(-Math.max(-100,Math.min(100,event.deltaY))/230),event.offsetX,event.offsetY);
+},{passive:false});
+canvas.addEventListener("pointerdown", event => {
+  if (!event.isPrimary || event.button !== 0) return;
+  drag = {id:event.pointerId,x:event.clientX,y:event.clientY,moved:false};
+  canvas.setPointerCapture(event.pointerId);
+});
+canvas.addEventListener("pointermove", event => {
+  if (drag?.id !== event.pointerId) return;
+  const dx = event.clientX-drag.x, dy = event.clientY-drag.y;
+  if (!drag.moved && Math.hypot(dx,dy) < 3) return;
+  view.x -= dx/view.scale; view.y -= dy/view.scale;
+  drag = {id:event.pointerId,x:event.clientX,y:event.clientY,moved:true};
+  drawSoon();
+});
+canvas.addEventListener("pointerup", event => {
+  if (drag?.id !== event.pointerId) return;
+  if (!drag.moved) inspectCell(event.offsetX,event.offsetY);
+  drag = undefined;
+  drawSoon();
+});
+canvas.addEventListener("lostpointercapture", () => { drag = undefined; drawSoon(); });
+canvas.addEventListener("keydown", event => {
+  const motion = {ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]}[event.key];
+  if (motion) {
+    view.x += 48*motion[0]/view.scale; view.y += 48*motion[1]/view.scale;
+    drawSoon();
+  } else if ("+-=".includes(event.key) && event.key.length === 1) {
+    zoom(event.key === "-" ? 1/1.5 : 1.5);
+  } else return;
+  event.preventDefault();
+});
+populate();
+resize();
+new ResizeObserver(resize).observe(canvas);
+</script>
+</body>
+</html>

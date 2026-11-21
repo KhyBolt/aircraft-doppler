@@ -47,11 +47,27 @@ def main():
     sp.add_argument("audio")
     sp.add_argument("output")
     sp.add_argument("--rate",type=int,default=2000)
-    sp.add_argument("--channel",type=int,default=0)
+    sp.add_argument("--channel",type=int,default=0,help="Zero-based channel in the first audio stream")
     sp.add_argument("--window",type=float,default=2)
     sp.add_argument("--hop",type=float,default=0.25)
     sp.add_argument("--fmin",type=float,default=40)
     sp.add_argument("--fmax",type=float,default=700)
+    locate = sub.add_parser(
+        "locate", help="Find two audio ridges and associate them with a supplied historical catalogue")
+    locate.add_argument("--audio", required=True, type=Path,
+                        help="Local PCM WAV or FFmpeg-readable audio/video, such as MP3 or MP4")
+    locate.add_argument("--tracks", required=True, type=Path,
+                        help="Normalized civilian track CSV (flight_id, time_s Unix UTC, latitude, longitude, altitude_ellipsoid_m)")
+    locate.add_argument("--start-utc", required=True,
+                        help="Approximate UTC of the first decoded audio sample, with timezone; search ±80 seconds")
+    locate.add_argument("--area-center", required=True, nargs=3, type=float,
+                        metavar=("LAT", "LON", "ELLIPSOID_HEIGHT_M"),
+                        help="WGS84 center and receiver height for a flat 10 × 10 km local search")
+    locate.add_argument("--channel", type=int, default=0, help="Zero-based channel in the first audio stream")
+    locate.add_argument("--max-seconds", type=int, default=120, choices=range(1, 541), metavar="1..540",
+                        help="Cooperative search time budget in seconds")
+    locate.add_argument("--output", type=Path, required=True,
+                        help="New or empty directory for inference.json and result-map.html")
     run = sub.add_parser("search",help="Search supplied bounded candidates and normalized tracks")
     run.add_argument("--tracks",required=True)
     run.add_argument("--candidates",required=True)
@@ -60,7 +76,7 @@ def main():
     source.add_argument("--audio")
     source.add_argument("--spectrogram")
     run.add_argument("--output",required=True)
-    run.add_argument("--channel",type=int,default=0)
+    run.add_argument("--channel",type=int,default=0,help="Zero-based channel in the first audio stream")
     grid = sub.add_parser("terrain-grid",help="Local DEM + geoid candidate grid (optional geospatial dependencies)")
     grid.add_argument("--bounds",type=float,nargs=4,required=True,metavar=("WEST","SOUTH","EAST","NORTH"))
     grid.add_argument("--spacing",type=float,default=200)
@@ -97,12 +113,24 @@ def main():
         Path(args.output).write_text(json.dumps(result,indent=2))
         print(json.dumps(result,indent=2))
     elif args.command == "spectrogram":
-        sr,x = read_audio(args.audio,args.rate,args.channel)
-        spec = make_spectrogram(x,sr,args.window,args.hop,args.fmin,args.fmax)
+        try:
+            sr, x = read_audio(args.audio, args.rate, args.channel)
+            spec = make_spectrogram(x, sr, args.window, args.hop, args.fmin, args.fmax)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
         save_spectrogram(spec,args.output)
         print(f"Saved {len(spec.t)} time frames and {len(spec.f)} frequency bins")
     elif args.command == "terrain-grid":
         print(write_geographic_grid(args.bounds,args.spacing,args.dem,args.geoid,args.output,args.mic_height))
+    elif args.command == "locate":
+        from .intake import locate_recording
+        try:
+            result = locate_recording(args.audio, args.tracks, args.start_utc, args.area_center,
+                                      args.output, channel=args.channel, max_seconds=args.max_seconds)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        print(json.dumps(result, indent=2, allow_nan=False))
+        return 0 if result["status"] == "supported_under_model" else 2
     elif args.command == "search":
         out = Path(args.output)
         out.mkdir(parents=True,exist_ok=True)
@@ -110,8 +138,11 @@ def main():
         if args.spectrogram:
             spec = load_spectrogram(args.spectrogram)
         else:
-            sr,x = read_audio(args.audio,channel=args.channel)
-            spec = make_spectrogram(x,sr,**stft_settings)
+            try:
+                sr, x = read_audio(args.audio, channel=args.channel)
+                spec = make_spectrogram(x, sr, **stft_settings)
+            except (OSError, ValueError) as error:
+                parser.error(str(error))
         tracks, candidates, frame = load_inputs(args.tracks, args.candidates)
         scores,audit = search(tracks,candidates,events,spec,settings,lambda s:print(s,file=sys.stderr))
         scores.to_csv(out/"scores.csv",index=False)
