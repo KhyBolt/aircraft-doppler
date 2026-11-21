@@ -14,6 +14,7 @@ from scipy.io import wavfile
 from aircraft_doppler.audio import read_audio
 from aircraft_doppler.cli import main
 from aircraft_doppler.intake import _utc
+from aircraft_doppler.wide import BudgetExceeded
 from test_result_map import map_data
 
 
@@ -136,9 +137,68 @@ class RecordingIntakeTests(unittest.TestCase):
             data = map_data(out / "result-map.html")
             self.assertFalse(data["accepted"])
             self.assertIsNone(data["receiver"])
+            self.assertIsNone(result["diagnostic_candidate"])
+            self.assertIsNone(data["diagnostic_candidate"])
+            self.assertIsNone(data["published_reference"])
+            self.assertIsNone(data["reference_separation_m"])
             self.assertEqual((data["grid"], data["tracks"]), ([], []))
             self.assertEqual(data["reasons"], result["abstention_reasons"])
             self.assertEqual(len(data["boundary"]), 4)
+
+    def test_diagnostic_candidate_is_retained_without_promoting_a_fix(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            tracks = path / "tracks.csv"
+            tracks.write_text("flight_id,time_s,latitude,longitude,altitude_ellipsoid_m\n" +
+                              "".join(f"sim-a,{1712507658+i},5,{5+.0003*i},1050\n" for i in range(7)))
+            for mode, public_status, candidate_status in (
+                ("abstained", "abstained", "not_accepted"),
+                ("timed_out", "timed_out", "partial_fit_not_accepted"),
+                ("supported_in_this_fixture", "supported_under_model", "also_supported"),
+            ):
+                with self.subTest(mode=mode):
+                    out = path / mode
+                    def recorded_fit(_audio, _tracks, _points, guarded, **kwargs):
+                        guarded.mkdir()
+                        (guarded / "grid_25m.csv").write_text(
+                            "x_m,y_m,z_m,loss_hz2\n25,0,0,0.125\n")
+                        fit = {"status": mode, "abstention_reasons": ["gate"] if mode != "supported_in_this_fixture" else [],
+                               "best_fit_diagnostic":{"xyz_m": [25,0,0], "loss_hz2": .125}}
+                        if mode == "timed_out":
+                            (guarded / "inference.json").write_text(json.dumps(fit))
+                            raise BudgetExceeded("budget")
+                        if mode == "supported_in_this_fixture":
+                            fit.update(estimated_xyz_m=[25,0,0], estimated_pair="sim-a|sim-b",
+                                       estimated_clock_offset_s=0, evidence_grade="conditional_on_supplied_track_catalogue")
+                        return fit
+                    with patch("aircraft_doppler.intake.infer", side_effect=recorded_fit):
+                        exit_code, stdout, stderr = invoke(
+                            "locate", "--audio", path/"unused.wav", "--tracks", tracks,
+                            "--start-utc", "2024-04-07T16:34:18Z",
+                            "--area-center", "5", "5", "100", "--output", out,
+                            "--published-reference", "5", "5")
+                    self.assertEqual(stderr, "")
+                    result = json.loads(stdout)
+                    data = map_data(out/"result-map.html")
+                    self.assertEqual(result["status"], public_status)
+                    self.assertEqual(exit_code, 0 if public_status == "supported_under_model" else 2)
+                    candidate = result["diagnostic_candidate"]
+                    self.assertEqual(candidate["status"], candidate_status)
+                    self.assertEqual(candidate["enu_m"], [25,0,0])
+                    self.assertAlmostEqual(candidate["lat_lon"][0], 5, places=7)
+                    self.assertGreater(candidate["lat_lon"][1], 5)
+                    self.assertEqual(data["diagnostic_candidate"]["lat_lon"], candidate["lat_lon"])
+                    self.assertEqual(data["grid"][0]["spacing_m"], 25)
+                    self.assertEqual(data["grid"][0]["centers_en_m"], [[25,0]])
+                    self.assertEqual(data["published_reference"]["lat_lon"], [5,5])
+                    self.assertAlmostEqual(data["reference_separation_m"], 25, delta=.2)
+                    self.assertNotIn("published_reference", result)
+                    if public_status == "supported_under_model":
+                        self.assertEqual(result["estimated_lat_lon"], candidate["lat_lon"])
+                        self.assertIsNotNone(data["receiver"])
+                    else:
+                        self.assertNotIn("estimated_lat_lon", result)
+                        self.assertIsNone(data["receiver"])
 
 
 if __name__ == "__main__":

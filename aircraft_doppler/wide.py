@@ -189,10 +189,18 @@ class Profile:
         self.cache[pos] = rows
         return rows
 
-    def table(self, points):
-        data = [row for pos in points for row in self.at(pos)]
-        return pd.DataFrame(data,columns=self.fields).sort_values(
+    def _table(self, rows):
+        return pd.DataFrame(rows,columns=self.fields).sort_values(
             ["loss_hz2","x_m","y_m","flight_pair"],kind="stable").reset_index(drop=True)
+
+    def table(self, points):
+        return self._table([row for pos in points for row in self.at(pos)])
+
+    def cached_table(self, points=None):
+        """Rank completed position scores without running any more search."""
+        if points is None:
+            points = self.cache
+        return self._table([row for pos in points for row in self.cache[pos]])
 
 
 def _modes(table, points, spacing, limit, radius, pair_margin):
@@ -236,6 +244,32 @@ def _grid(points, score_table):
     return table.merge(per_point,on=XYZ,how="left",validate="1:1")
 
 
+def _score_stage(scorer, points, output, spacing):
+    """Export only genuinely attempted cells, including an interrupted stage."""
+    path = output / f"grid_{spacing}m.csv"
+    try:
+        table = scorer.table(points)
+    except BudgetExceeded:
+        completed = [point for point in points if point in scorer.cache]
+        if completed:
+            _grid(completed, scorer.cached_table(completed)).to_csv(path, index=False)
+        raise
+    _grid(points, table).to_csv(path, index=False)
+    return table
+
+
+def _best_fit(table, event_count):
+    """Describe a finite lowest-residual row, with no acceptance implication."""
+    valid = np.isfinite(table[[*XYZ, "loss_hz2"]].to_numpy(float)).all(axis=1)
+    if not valid.any():
+        return None
+    winner = table.loc[valid].iloc[0]
+    return {"loss_hz2": float(winner.loss_hz2), "xyz_m": winner[XYZ].to_numpy(float).tolist(),
+            "pair": str(winner.flight_pair), "clock_offset_s": float(winner.clock_offset_s),
+            "per_event_rmse_hz": [float(np.sqrt(winner[f"event_{i}_loss_hz2"]))
+                                  for i in range(1, event_count + 1)]}
+
+
 def infer(audio_path, tracks_path, points_path, output, *, deadline=None, hardened=False, channel=0):
     """Inference receives no scene ID, source frequencies, event picks, or truth."""
     start = perf_counter()
@@ -261,7 +295,12 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
     if frame != "cartesian" or set(candidates) != set(expected) or not np.allclose(
             point_table[XYZ],candidates,rtol=0,atol=0):
         raise ValueError("Wide benchmark is fixed to the full synthetic 10 × 10 km lattice")
-    _deadline_check(deadline)
+    try:
+        _deadline_check(deadline)
+    except BudgetExceeded as error:
+        report.update(status="timed_out", abstention_reasons=[str(error)])
+        finish()
+        raise
     try:
         events, detections, audio_audit = detect_two_events_among_distractors(spec,SOUND_MPS)
     except InsufficientEvidence as exc:
@@ -290,29 +329,36 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
             report["abstention_reasons"] = ["Insufficient audio for guarded fit and verification"]
             return finish()
     scorer = Profile(tracks,events,deadline,trace_override=use_traces)
-    stage_points = [candidates]
-    table = scorer.table(candidates)
-    _grid(candidates,table).to_csv(output/"grid_500m.csv",index=False)
-    report["stage_audit"] = [{"spacing_m":SURVEY_M,"positions":len(candidates),
-                              "feasible_positions":len(table.drop_duplicates(XYZ)),
-                              "audit_cumulative":dict(scorer.audit)}]
-    if table.empty:
-        report["abstention_reasons"] = ["No pair of distinct tracks covers both ridges at a common clock offset"]
-        return finish()
-    for k,(step,radius,limit,pair_margin) in enumerate(STAGES):
-        previous_step = SURVEY_M if k == 0 else STAGES[k-1][0]
-        reference = set(q for stage in stage_points for q in stage if all(v%previous_step==0 for v in q))
-        centers = _modes(table,reference,previous_step,limit,radius,pair_margin)
-        points = _refine(centers,step,radius)
-        stage = scorer.table(points)
-        _grid(points,stage).to_csv(output/f"grid_{step}m.csv",index=False)
-        stage_points.append(points)
-        all_points = sorted(set(q for group in stage_points for q in group))
-        table = scorer.table(all_points)
-        report["stage_audit"].append({"spacing_m":step,"positions":len(points),
-                                      "feasible_positions":len(stage.drop_duplicates(XYZ)),
-                                      "centers_xyz_m":[list(q) for q in centers],
-                                      "audit_cumulative":dict(scorer.audit)})
+    try:
+        stage_points = [candidates]
+        table = _score_stage(scorer, candidates, output, SURVEY_M)
+        report["stage_audit"] = [{"spacing_m":SURVEY_M,"positions":len(candidates),
+                                  "feasible_positions":len(table.drop_duplicates(XYZ)),
+                                  "audit_cumulative":dict(scorer.audit)}]
+        if table.empty:
+            report["abstention_reasons"] = ["No pair of distinct tracks covers both ridges at a common clock offset"]
+            return finish()
+        for k,(step,radius,limit,pair_margin) in enumerate(STAGES):
+            previous_step = SURVEY_M if k == 0 else STAGES[k-1][0]
+            reference = set(q for stage in stage_points for q in stage if all(v%previous_step==0 for v in q))
+            centers = _modes(table,reference,previous_step,limit,radius,pair_margin)
+            points = _refine(centers,step,radius)
+            stage = _score_stage(scorer, points, output, step)
+            stage_points.append(points)
+            all_points = sorted(set(q for group in stage_points for q in group))
+            table = scorer.table(all_points)
+            report["stage_audit"].append({"spacing_m":step,"positions":len(points),
+                                          "feasible_positions":len(stage.drop_duplicates(XYZ)),
+                                          "centers_xyz_m":[list(q) for q in centers],
+                                          "audit_cumulative":dict(scorer.audit)})
+
+    except BudgetExceeded as error:
+        report.update(status="timed_out", abstention_reasons=[str(error)], audit=dict(scorer.audit))
+        best = _best_fit(scorer.cached_table(), len(events))
+        if best is not None:
+            report["best_fit_diagnostic"] = best
+        finish()
+        raise
 
     table.to_csv(output/"final_scores.csv",index=False)
     by_pair = table.drop_duplicates("flight_pair")
@@ -341,10 +387,7 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
     if abs(win.clock_offset_s) >= CLOCK_HALF_S:
         reasons.append("Best clock offset reaches the global uncertainty bound")
     report.update({"audit":dict(scorer.audit),
-                   "best_fit_diagnostic":{"loss_hz2":float(win.loss_hz2),
-                                          "xyz_m":win[XYZ].to_numpy(float).tolist(),
-                                          "pair":str(win.flight_pair),"clock_offset_s":float(win.clock_offset_s),
-                                          "per_event_rmse_hz":rmses.tolist()},
+                   "best_fit_diagnostic":_best_fit(table, len(events)),
                    "number_of_feasible_pairs":len(by_pair),
                    "pair_gap_hz2":pair_gap,"pair_ambiguous":bool(pair_ambiguous),
                    "near_best_grid":{"span_xy_m":span.tolist(),"point_count":len(near),

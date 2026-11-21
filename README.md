@@ -52,10 +52,16 @@ passed the model's checks. Exit 2 covers abstention or invalid input.
 A completed run writes `runs/local/inference.json` and
 `runs/local/result-map.html`. Open the HTML in a browser to pan, zoom, and
 inspect the search boundary, sampled fit scores, and selected flight paths.
-An accepted run marks the predicted receiver. On abstention, the map shows
-the available diagnostic layers, labels any leading track pair as unverified,
-and omits a receiver pin. The JSON still records the reasons and omits
-the estimated position and pair.
+An accepted run marks the receiver as supported under the model. On abstention
+or a timeout, a finite lowest-residual point is shown separately as an
+**estimated candidate, not accepted**, never as a receiver fix. The JSON
+stores that point and its WGS84 coordinates in `diagnostic_candidate`,
+or `null` if nothing was scored; `estimated_*` fields appear only after
+all acceptance gates pass. On a timeout the candidate only describes
+completed scoring work. A leading track hypothesis is unverified.
+Add `--published-reference LAT LON` only for an intentionally published
+benchmark location you want marked on the map. It is not used to fit audio
+or accept a point. The map reports separation only when both points exist.
 
 The survey and refinement layers show minimum training ridge MSE (Hz²) at
 the positions the solver actually scored. Toggle each stage separately or
@@ -64,7 +70,7 @@ With one refinement layer visible, colors adapt to the visible scores
 and the cell readout keeps the original scale in Hz².
 When finite scores exist, `evaluated-grid.json` saves the exact local
 east, north and up coordinates, loss, stage spacing, first evaluation
-spacing, and clipped scored-cell footprint for each completed stage.
+spacing, and clipped scored-cell footprint for each stage with finite scores.
 A reused point keeps its original score. No scores are interpolated, and
 the footprint describes coverage, not location probability or uncertainty.
 The HTML works offline. You can enable USGS topographic tiles in the browser
@@ -73,8 +79,8 @@ without them. The HTML contains location and flight geometry, so share it only
 with people who can receive those details.
 
 `--max-seconds` sets the cooperative search budget. Decoding and input
-preparation can also take time. After a timeout only completed scored
-stages are exported.
+preparation can also take time. After a timeout only positions that finished scoring are exported, including
+positions within an interrupted refinement stage.
 
 Intake was verified with synthetic PCM WAV, MP3, and MP4 with AAC. The
 same synthetic flight pair and 14.2 m error were measured for each format.

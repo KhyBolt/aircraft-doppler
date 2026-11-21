@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .physics import geodetic_to_ecef
 from .wide import STAGES, SURVEY_M, XYZ
 
 WORLD_M = 2 * np.pi * 6378137.
@@ -90,12 +91,52 @@ def _project(local, to_lat_lon, center_lon, mercator):
     return WORLD_M * np.stack(((lon + 180.)/360., .5 - np.arcsinh(np.tan(radians))/(2*np.pi)), axis=-1)
 
 
+def diagnostic_candidate(best, to_lat_lon, status):
+    """Expose a finite sampled best fit without claiming a supported location."""
+    if not best or "xyz_m" not in best or "loss_hz2" not in best:
+        return None
+    enu = np.asarray(best["xyz_m"], dtype=float)
+    mse = float(best["loss_hz2"])
+    if enu.shape != (3,) or not np.isfinite(enu).all() or not np.isfinite(mse) or mse < 0:
+        return None
+    coordinates = np.asarray(to_lat_lon(enu), dtype=float)
+    if (coordinates.shape != (2,) or not np.isfinite(coordinates).all()
+            or np.any(abs(coordinates) > [90, 180])):
+        return None
+    label = {"timed_out": "partial_fit_not_accepted",
+             "supported_under_model": "also_supported",
+             "supported_under_test_profile": "also_supported"}.get(status, "not_accepted")
+    return {"status": label, "lat_lon": coordinates.tolist(), "enu_m": enu.tolist(),
+            "training_mse_hz2": mse}
+
+
+def great_circle_m(a, b):
+    """Display-only great-circle separation between two WGS84 lat/lon pairs."""
+    first, second = np.deg2rad([a, b])
+    dlat, dlon = first - second
+    h = (np.sin(dlat/2)**2 + np.cos(first[0])*np.cos(second[0])*np.sin(dlon/2)**2)
+    return float(6371008.8*2*np.arcsin(np.sqrt(np.clip(h, 0, 1))))
+
+
+def _reference_location(reference, origin, mercator):
+    lat, lon, height = origin
+    position = geodetic_to_ecef(*reference, height)
+    if mercator:
+        xy = _project(reference, lambda point: point, lon, True)
+    else:
+        a, b = np.deg2rad([lat, lon])
+        axes = np.array([[-np.sin(b), np.cos(b), 0],
+                        [np.sin(a)*np.cos(b), np.sin(a)*np.sin(b), -np.cos(a)]])
+        xy = axes @ (position - geodetic_to_ecef(lat, lon, height))
+    return {"coordinates": np.round(xy, 3).tolist(), "lat_lon": list(reference)}
+
+
 def _utc(epoch):
     return datetime.fromtimestamp(float(epoch), timezone.utc).isoformat()
 
 
-def write_result_map(path, result, fit, grids, tracks, to_lat_lon):
-    """Keep diagnostic geometry separate from the stable inference JSON schema."""
+def write_result_map(path, result, fit, grids, tracks, to_lat_lon, *, published_reference=None):
+    """Embed sampled cells and distinct model, diagnostic and published markers."""
     latitude, longitude, _ = result["area_center_lat_lon_ellipsoid_m"]
     half = result["area_width_m"] / 2
     mercator = abs(latitude) < 84.
@@ -122,7 +163,7 @@ def write_result_map(path, result, fit, grids, tracks, to_lat_lon):
     else:
         score_range = None
 
-    accepted = result["status"] == "supported_under_model"
+    accepted = result["status"] in {"supported_under_model", "supported_under_test_profile"}
     diagnostic = fit.get("best_fit_diagnostic", {})
     pair = result["estimated_pair"] if accepted else diagnostic.get("pair", "").split("|")
     paths = []
@@ -136,8 +177,17 @@ def write_result_map(path, result, fit, grids, tracks, to_lat_lon):
     if accepted:
         receiver = {"coordinates": project(result["estimated_enu_m"]),
                     "lat_lon": result["estimated_lat_lon"]}
+    candidate = result.get("diagnostic_candidate")
+    if candidate is not None:
+        candidate = {**candidate, "coordinates": project(candidate["enu_m"])}
+    ref = (_reference_location(published_reference, result["area_center_lat_lon_ellipsoid_m"], mercator)
+           if published_reference is not None else None)
+    comparison = None
+    if ref is not None and (receiver is not None or candidate is not None):
+        comparison = great_circle_m((receiver or candidate)["lat_lon"], ref["lat_lon"])
     data = {
         "accepted": accepted,
+        "status": result["status"],
         "reasons": result["abstention_reasons"],
         "center": [latitude, longitude],
         "clock_anchor": result["supplied_start_utc"],
@@ -154,6 +204,9 @@ def write_result_map(path, result, fit, grids, tracks, to_lat_lon):
         "score_range": score_range,
         "tracks": paths,
         "receiver": receiver,
+        "diagnostic_candidate": candidate,
+        "published_reference": ref,
+        "reference_separation_m": comparison,
         "per_event_training_rmse_hz": diagnostic.get("per_event_rmse_hz"),
         "sampled_near_best_span_m": fit.get("near_best_grid", {}).get("span_xy_m"),
     }

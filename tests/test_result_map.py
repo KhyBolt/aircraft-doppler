@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 from aircraft_doppler.result_map import (
-    ScoredGrid, _project, read_scored_grids, write_evaluated_grid, write_result_map,
+    ScoredGrid, _project, diagnostic_candidate, read_scored_grids, write_evaluated_grid, write_result_map,
 )
 
 
@@ -84,6 +84,39 @@ class ResultMapTests(unittest.TestCase):
                     else:
                         self.assertIsNone(data["receiver"])
                         self.assertNotIn("xyz_m", data)
+
+    def test_diagnostic_coordinates_require_a_finite_position_and_score(self):
+        for best in (None, {}, {"xyz_m": [1,2,3]}, {"xyz_m": [1,2,np.nan], "loss_hz2": 0.},
+                     {"xyz_m": [1,2,3], "loss_hz2": np.inf}):
+            with self.subTest(best=best):
+                self.assertIsNone(diagnostic_candidate(best, lambda _: [0,0], "abstained"))
+        self.assertIsNone(diagnostic_candidate({"xyz_m": [0,0,0], "loss_hz2": 0.},
+                                              lambda _: [100,0], "abstained"))
+
+    def test_public_eclipse_reference_and_candidate_are_distinct_from_a_fix(self):
+        from shutil import copyfile
+        from benchmarks.eclipse_replay import evaluate
+
+        evidence = Path(__file__).resolve().parents[1]/"evidence"/"eclipse-505"
+        suite = json.loads((evidence/"summary.json").read_text())
+        recorded = next(item for item in suite["runs"] if item["run"] == "registered")
+        # An already-published field result; the reference is supplied only to evaluation.
+        report = {**recorded, "origin_lat_lon_ellipsoid_m": suite["origin_lat_lon_ellipsoid_m"],
+                  "square_width_m": suite["grid_width_m"]}
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            (path/"inference.json").write_text(json.dumps(report))
+            copyfile(evidence/"registered-grid-500m.csv", path/"grid_500m.csv")
+            result = evaluate(path, recorded["reference_lat_lon"])
+            data = map_data(path/"result-map-with-reference.html")
+            self.assertEqual(result["status"], "abstained")
+            self.assertFalse(result["hit_within_1000_m"])
+            self.assertIsNone(data["receiver"])
+            self.assertEqual(data["diagnostic_candidate"]["status"], "not_accepted")
+            self.assertEqual(data["published_reference"]["lat_lon"], recorded["reference_lat_lon"])
+            self.assertAlmostEqual(data["reference_separation_m"], 395, delta=2)
+            self.assertEqual([layer["spacing_m"] for layer in data["grid"]], [500])
+            self.assertEqual(json.loads((path/"inference.json").read_text()), report)
 
     def test_mercator_wraps_a_regional_track_near_the_dateline(self):
         point = np.array([[0, 179.95], [0, -179.95]])

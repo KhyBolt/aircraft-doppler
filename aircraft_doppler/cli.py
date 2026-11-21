@@ -63,6 +63,8 @@ def main():
     locate.add_argument("--area-center", required=True, nargs=3, type=float,
                         metavar=("LAT", "LON", "ELLIPSOID_HEIGHT_M"),
                         help="WGS84 center and receiver height for a flat 10 × 10 km local search")
+    locate.add_argument("--published-reference", type=float, nargs=2, metavar=("LAT", "LON"),
+                        help="Optional deliberately published benchmark point, shown only on the result map")
     locate.add_argument("--channel", type=int, default=0, help="Zero-based channel in the first audio stream")
     locate.add_argument("--max-seconds", type=int, default=120, choices=range(1, 541), metavar="1..540",
                         help="Cooperative search time budget in seconds")
@@ -126,7 +128,8 @@ def main():
         from .intake import locate_recording
         try:
             result = locate_recording(args.audio, args.tracks, args.start_utc, args.area_center,
-                                      args.output, channel=args.channel, max_seconds=args.max_seconds)
+                                      args.output, channel=args.channel, max_seconds=args.max_seconds,
+                                      published_reference=args.published_reference)
         except (OSError, ValueError) as error:
             parser.error(str(error))
         print(json.dumps(result, indent=2, allow_nan=False))

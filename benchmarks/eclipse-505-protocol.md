@@ -36,6 +36,8 @@ python -m benchmarks.eclipse_replay infer --audio runs/field-input/apr07-first45
 python -m benchmarks.eclipse_replay evaluate --reference 39.7125 -84.152222 --output runs/eclipse-505-edge/<arm>
 ```
 
+Inference writes an offline `result-map.html` with any sampled candidate clearly separated from an accepted point. Evaluation produces `result-map-with-reference.html` using the deliberately supplied public reference; it labels only actually scored stages and never changes the inference. A time-limited search can show scored positions and its lowest residual without counting it as a fix.
+
 For the two additional 30-minute runs, use `--budget-s 180` with a new output ending in `extended-180s`, and `--final-spacing-m 100 --budget-s 120` with a new output ending in `extended-100m`. The 100 m run is diagnostic because the acceptance gate requires a 25 m search.
 
 Download the map asset and render the registered diagnostic. On Windows PowerShell use `curl.exe`.

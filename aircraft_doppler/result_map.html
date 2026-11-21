@@ -85,6 +85,7 @@
       <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
       <button id="reset" type="button">Fit search area</button>
       <button id="fit-tracks" type="button">Fit tracks</button>
+      <button id="fit-markers" type="button" hidden>Fit marked points</button>
       <button id="fit-refinement" type="button">Fit finest grid</button>
     </div>
     <div class="north" aria-hidden="true">N<br>↑</div>
@@ -163,19 +164,32 @@ const scoreText = value => value.toPrecision(4);
 const km = value => (value / 1000).toLocaleString(undefined, {maximumFractionDigits: 2});
 
 function populate() {
-  setText("assessment", data.accepted ? "Estimate supported" : "Location abstained");
+  setText("assessment", data.accepted ? "Estimate supported" :
+    data.status === "timed_out" ? "Time budget reached" : "Location abstained");
   byId("assessment").classList.toggle("supported", data.accepted);
   setText("assessment-note", data.accepted
     ? "Conditional on the supplied track catalogue and the model’s checks."
-    : "Diagnostic view. No predicted receiver was accepted.");
+    : data.diagnostic_candidate
+      ? "The lowest-residual sampled point is for inspection only. No receiver location was accepted."
+      : "No receiver location was accepted and no finite sampled estimate is available.");
   for (const reason of data.reasons) {
     const li = document.createElement("li");
     li.textContent = reason;
     byId("reasons").append(li);
   }
   const details = byId("run-details");
-  if (data.receiver) addDetail(details, "Predicted receiver",
-    data.receiver.lat_lon.map(value => value.toFixed(5) + "°").join(", "));
+  const latLonText = point => point.lat_lon.map(value => value.toFixed(6) + "°").join(", ");
+  if (data.receiver) addDetail(details, "Supported by model", latLonText(data.receiver));
+  if (data.diagnostic_candidate && !data.receiver) addDetail(details,
+    data.diagnostic_candidate.status === "partial_fit_not_accepted"
+      ? "Estimated candidate · partial search, not accepted" : "Estimated candidate · not accepted",
+    latLonText(data.diagnostic_candidate));
+  if (data.published_reference) addDetail(details, "Published reference · not used in the estimate",
+    latLonText(data.published_reference));
+  if (data.reference_separation_m !== null) addDetail(details,
+    data.accepted ? "Supported estimate to published reference" : "Diagnostic candidate to published reference",
+    Math.round(data.reference_separation_m).toLocaleString() + " m");
+  byId("fit-markers").hidden = !data.published_reference;
   if (data.sampled_near_best_span_m) addDetail(details, "Near-best sampled span",
     data.sampled_near_best_span_m.map(value => value.toFixed(0) + " m").join(" east × ") + " north");
   if (data.per_event_training_rmse_hz) addDetail(details, "Training RMSE by ridge",
@@ -214,7 +228,7 @@ function populate() {
     stageList.append(absent);
   }
 
-  const tracksLabel = data.accepted ? "Selected catalogue segments." : "Leading diagnostic pair. Association unverified.";
+  const tracksLabel = data.accepted ? "Selected catalogue segments." : "Leading diagnostic track hypothesis. Association unverified.";
   setText("tracks-note", data.tracks.length
     ? tracksLabel + (data.tracks.length < 2 ? " One track is unavailable." : "")
     : "Unavailable. The run did not identify a usable track pair.");
@@ -251,9 +265,14 @@ function screen(point) {
 function mapPoint(x, y) {
   return [view.x + (x-width/2)/view.scale, view.y + (y-height/2)/view.scale];
 }
-function fit(includeTracks) {
+function fit(includeTracks, includeMarkers=false) {
   let loX = Infinity, loY = Infinity, hiX = -Infinity, hiY = -Infinity;
   const lines = includeTracks ? [data.boundary, ...data.tracks.map(track => track.coordinates)] : [data.boundary];
+  if (includeMarkers) {
+    const points = [data.published_reference, data.receiver || data.diagnostic_candidate]
+      .filter(Boolean).map(point => point.coordinates);
+    lines.splice(0, lines.length, points);
+  }
   for (const line of lines) {
     for (const [x,y] of line) {
       loX = Math.min(loX,x); loY = Math.min(loY,y); hiX = Math.max(hiX,x); hiY = Math.max(hiY,y);
@@ -264,7 +283,7 @@ function fit(includeTracks) {
 function fitBounds([[loX,loY],[hiX,hiY]]) {
   view.x = (loX+hiX)/2;
   view.y = (loY+hiY)/2;
-  view.scale = Math.min(width/(hiX-loX), height/(hiY-loY)) * .76;
+  view.scale = Math.min(width/Math.max(hiX-loX, 500), height/Math.max(hiY-loY, 500)) * .76;
   drawSoon();
 }
 function visibleHeat() {
@@ -400,30 +419,28 @@ function drawHeat() {
     ctx.stroke();
   }
 }
-function drawReceiver() {
-  if (!data.receiver) return;
-  const [x,y] = screen(data.receiver.coordinates);
-  ctx.fillStyle = "#f6f5ec";
-  ctx.strokeStyle = "#16252d";
+function drawMarker(point, label, color, symbol) {
+  if (!point) return;
+  const [x,y] = screen(point.coordinates);
+  const r = symbol === "reference" ? 9 : 6;
+  ctx.strokeStyle = "#101a1f";
+  ctx.fillStyle = color;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x,y);
-  ctx.lineTo(x-6,y-10);
-  ctx.arc(x,y-15,8,2.52,.62);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "#20313b";
-  ctx.beginPath();
-  ctx.arc(x,y-15,3,0,2*Math.PI);
-  ctx.fill();
-  const label = "Predicted receiver";
+  if (symbol === "reference") {
+    ctx.arc(x,y,r,0,2*Math.PI);
+  } else {
+    ctx.moveTo(x,y-r); ctx.lineTo(x+r,y); ctx.lineTo(x,y+r); ctx.lineTo(x-r,y); ctx.closePath();
+  }
+  ctx.fill(); ctx.stroke();
   ctx.font = "600 12px system-ui";
   const box = ctx.measureText(label).width + 16;
   const tx = x + box + 14 < width ? x + 12 : x - box - 12;
-  ctx.fillRect(tx,y-27,box,20);
-  ctx.fillStyle = "#fff";
-  ctx.fillText(label,tx+8,y-13);
+  const ty = symbol === "reference" ? y+10 : y-28;
+  ctx.fillStyle = "#18272f";
+  ctx.fillRect(tx,ty,box,20);
+  ctx.fillStyle = color;
+  ctx.fillText(label,tx+8,ty+14);
 }
 function drawScale() {
   const nominal = 110 * data.local_m_per_map_m / view.scale;
@@ -462,7 +479,12 @@ function draw() {
       ctx.stroke();
     });
   }
-  drawReceiver();
+  drawMarker(data.published_reference, "Published reference", "#9eeef2", "reference");
+  if (data.receiver) {
+    drawMarker(data.receiver, "Supported by model", "#a6efbd", "supported");
+  } else {
+    drawMarker(data.diagnostic_candidate, "Estimated candidate · not accepted", "#ffd195", "diagnostic");
+  }
   drawScale();
 }
 function resize() {
@@ -505,6 +527,7 @@ byId("zoom-in").onclick = () => zoom(1.5);
 byId("zoom-out").onclick = () => zoom(1/1.5);
 byId("reset").onclick = () => fit(false);
 byId("fit-tracks").onclick = () => fit(true);
+byId("fit-markers").onclick = () => fit(false, true);
 byId("fit-refinement").onclick = () => {
   if (!finest) return;
   heat.checked = true;

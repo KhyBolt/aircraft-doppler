@@ -9,7 +9,7 @@ from numpy.testing import assert_allclose
 from aircraft_doppler.physics import Track, forward_curve
 from aircraft_doppler.search import Event
 from aircraft_doppler.wide import (CLOCKS, Profile, _trace_loss, _minima, _modes, BudgetExceeded, _deadline_check,
-                                   evaluate, infer, run)
+                                   _best_fit, _score_stage, evaluate, infer, run)
 
 
 class WideSyntheticTests(unittest.TestCase):
@@ -76,6 +76,28 @@ class WideSyntheticTests(unittest.TestCase):
             self.assertEqual(report["status"],"timed_out_partial")
             self.assertEqual(report["cases_completed"],{})
             self.assertEqual(json.loads((dest/"suite_summary.json").read_text())["first_unfinished_case"],"holdout-nw")
+
+    def test_interrupted_stage_exports_only_cached_positions_and_retains_best(self):
+        times = np.arange(0.,100.)
+        track = Track("test", times, np.column_stack((75*(times-50), 1000+0*times, 800+0*times)))
+        curve = forward_curve(track, (0,0,0))
+        t = np.arange(30.,60.)
+        obs = 120 * np.interp(t, curve.arrival_s, curve.ratio)
+        event = Event((t[0],t[-1]), 52, (110,130,.2), trace_points=np.column_stack((t,obs)).tolist())
+        profile = Profile([track],[event],clock_half_s=0)
+        points = [(0,0,0), (25,0,0), (50,0,0)]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with patch("aircraft_doppler.wide._deadline_check", side_effect=[None,None,BudgetExceeded("limit")]):
+                with self.assertRaises(BudgetExceeded):
+                    _score_stage(profile, points, root, 25)
+            table = pd.read_csv(root/"grid_25m.csv")
+            self.assertEqual(table.x_m.tolist(), [0,25])
+            self.assertTrue(np.isfinite(table.loss_hz2).all())
+            best = _best_fit(profile.cached_table(), 1)
+            self.assertEqual(best["xyz_m"], [0,0,0])
+            self.assertEqual(best["pair"], "test")
+            self.assertAlmostEqual(best["loss_hz2"], 0)
 
     def test_inference_is_independent_of_truth_file(self):
         from aircraft_doppler.wide_fixture import SCENES, make_scene

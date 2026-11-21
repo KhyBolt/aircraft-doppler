@@ -2,7 +2,7 @@
 
 import argparse
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 import wave
@@ -17,10 +17,11 @@ from aircraft_doppler.detection import (
     FIELD_BANDS_HZ, InsufficientEvidence, detect_field_events, detect_two_events_among_distractors,
 )
 from aircraft_doppler.physics import Track, geodetic_to_ecef
+from aircraft_doppler.result_map import diagnostic_candidate, great_circle_m, read_scored_grids, write_result_map
 from aircraft_doppler.wide import (
     EDGE_M, MAX_SPAN_M, NEAR_BEST_MSE_HZ2, PAIR_MSE_GAP_HZ2, SOUND_MPS, STAGES,
-    SURVEY_M, TRACE_RMSE_LIMIT_HZ, BudgetExceeded, Profile, _deadline_check, _grid, _modes, _refine,
-    _sha256,
+    SURVEY_M, TRACE_RMSE_LIMIT_HZ, BudgetExceeded, Profile, _best_fit, _deadline_check, _modes, _refine,
+    _score_stage, _sha256,
 )
 
 LAT, LON, ELLIPSOID_HEIGHT_M = 39.73, -84.20, 190.
@@ -100,6 +101,45 @@ def local_tracks(path, start_utc, duration_s):
     return tracks, audit
 
 
+def _render_map(output, report, *, published_reference=None, tracks=()):
+    anchor = report["claimed_start_utc_s"]
+    geometry = {track.flight_id: (track.xyz, track.t[0]+anchor, track.t[-1]+anchor)
+                for track in tracks}
+    best = report.get("diagnostic_candidate")
+    if best is None and report.get("diagnostic_point_lat_lon") is not None:
+        # Existing public replays store the point and per-event RMSE, but their
+        # compact evidence summary may not retain the original ENU row.
+        enu = report.get("diagnostic_point_enu_m")
+        if enu is None:
+            position = geodetic_to_ecef(*report["diagnostic_point_lat_lon"], ELLIPSOID_HEIGHT_M)
+            enu = (position - ORIGIN) @ ENU.T
+        mse = float(np.mean(np.square(report["ridge_rmse_hz"])))
+        best = diagnostic_candidate({"xyz_m": enu, "loss_hz2": mse},
+                                    lambda _: report["diagnostic_point_lat_lon"], report["status"])
+    view = {
+        "status": report["status"], "abstention_reasons": report["reasons"],
+        "area_center_lat_lon_ellipsoid_m": report["origin_lat_lon_ellipsoid_m"],
+        "area_width_m": report["square_width_m"],
+        "supplied_start_utc": datetime.fromtimestamp(anchor, timezone.utc).isoformat(),
+        "clock_half_width_s": report["clock_half_s"],
+        "ridges_detected": report["ridges_selected"],
+        "track_segments": report["track_audit"]["retained_segments"],
+        "diagnostic_candidate": best,
+        "estimated_pair": report.get("diagnostic_track_segments", []),
+        "estimated_lat_lon": report.get("estimated_point_lat_lon"),
+        "estimated_enu_m": report.get("diagnostic_point_enu_m"),
+        "input_sha256": {"audio": report["input_sha256"]["wav"],
+                         "tracks": report["input_sha256"]["regional_adsb"]},
+    }
+    fit = {"best_fit_diagnostic": {
+                "pair": "|".join(report.get("diagnostic_track_segments", [])),
+                "per_event_rmse_hz": report.get("ridge_rmse_hz"),
+           }, "near_best_grid": {"span_xy_m": report.get("near_best_span_enu_m")}}
+    name = "result-map-with-reference.html" if published_reference is not None else "result-map.html"
+    write_result_map(output / name, view, fit, read_scored_grids(output), geometry, to_geographic,
+                     published_reference=published_reference)
+
+
 def infer(audio, adsb, arm, output, budget_s, detector, final_spacing_m):
     start = perf_counter()
     output.mkdir(parents=True, exist_ok=True)
@@ -118,10 +158,22 @@ def infer(audio, adsb, arm, output, budget_s, detector, final_spacing_m):
         "detector_profile": detector, "final_spacing_m": final_spacing_m,
     }
 
+    tracks = []
+    best_fit = None
+
     def finish(*reasons):
         report["reasons"] = reasons
         report["wall_s"] = round(perf_counter() - start, 3)
+        candidate = diagnostic_candidate(best_fit, to_geographic, report["status"])
+        report["diagnostic_candidate"] = candidate
+        if candidate is not None:
+            report.update(diagnostic_point_lat_lon=candidate["lat_lon"],
+                          diagnostic_point_enu_m=candidate["enu_m"],
+                          diagnostic_track_segments=best_fit["pair"].split("|"),
+                          diagnostic_clock_offset_s=best_fit["clock_offset_s"],
+                          ridge_rmse_hz=best_fit["per_event_rmse_hz"])
         _write_json(output / "inference.json", report)
+        _render_map(output, report, tracks=tracks)
         return report
 
     sr, samples = read_audio(wav_path)
@@ -148,10 +200,10 @@ def infer(audio, adsb, arm, output, budget_s, detector, final_spacing_m):
     points = [(x, y, 0) for x in range(-EDGE_M, EDGE_M + 1, SURVEY_M)
               for y in range(-EDGE_M, EDGE_M + 1, SURVEY_M)]
     deadline = start + budget_s
+    scorer = None
     try:
         scorer = Profile(tracks, events, deadline, trace_override=train, clock_half_s=CLOCK_HALF_S)
-        table = scorer.table(points)
-        _grid(points, table).to_csv(output / f"grid_{SURVEY_M}m.csv", index=False)
+        table = _score_stage(scorer, points, output, SURVEY_M)
         report["search_audit"] = dict(scorer.audit)
         if table.empty:
             return finish("No track hypothesis covered every selected ridge under the clock prior")
@@ -164,20 +216,22 @@ def infer(audio, adsb, arm, output, budget_s, detector, final_spacing_m):
             lattice = {point for point in tested if all(value % step == 0 for value in point)}
             centers = _modes(table, lattice, step, mode_cap, radius, margin)
             points = _refine(centers, next_step, radius)
-            stage = scorer.table(points)
-            _grid(points, stage).to_csv(output / f"grid_{next_step}m.csv", index=False)
+            _score_stage(scorer, points, output, next_step)
             tested.update(points)
             table = scorer.table(sorted(tested))
             step = next_step
     except BudgetExceeded as error:
         report["status"] = "timed_out"
+        if scorer is not None:
+            report["search_audit"] = dict(scorer.audit)
+            best_fit = _best_fit(scorer.cached_table(), len(events))
         return finish(str(error))
 
     table.to_csv(output / "scores.csv", index=False)
     by_pair = table.drop_duplicates("flight_pair")
     by_pair.to_csv(output / "best_per_pair.csv", index=False)
     winner = table.iloc[0]
-    point = winner[XYZ].to_numpy(float)
+    best_fit = _best_fit(table, len(events))
     distances = np.sqrt([winner[f"event_{i+1}_loss_hz2"] for i in range(len(events))])
     near = table[table.loss_hz2 <= winner.loss_hz2 + NEAR_BEST_MSE_HZ2].drop_duplicates(XYZ)
     span = np.ptp(near[["x_m", "y_m"]].to_numpy(), axis=0)
@@ -189,9 +243,6 @@ def infer(audio, adsb, arm, output, budget_s, detector, final_spacing_m):
     blocks, reasons = check_locked_hypothesis(winner, tracks, train, held, SOUND_MPS, hz_bin)
     report.update({
         "search_audit": dict(scorer.audit), "hypotheses_ranked": len(by_pair),
-        "diagnostic_point_lat_lon": to_geographic(point).tolist(), "diagnostic_point_enu_m": point.tolist(),
-        "diagnostic_track_segments": winner.flight_pair.split("|"),
-        "diagnostic_clock_offset_s": float(winner.clock_offset_s),
         "ridge_rmse_hz": distances.tolist(), "hypothesis_gap_hz2": pair_gap,
         "near_best_count": len(near), "near_best_span_enu_m": span.tolist(),
         "near_best_complete_fine_neighborhood": complete, "corroboration": blocks,
@@ -212,7 +263,7 @@ def infer(audio, adsb, arm, output, budget_s, detector, final_spacing_m):
         reasons.append("Near-tied track hypotheses")
     if not reasons:
         report["status"] = "supported_under_test_profile"
-        report["estimated_point_lat_lon"] = report["diagnostic_point_lat_lon"]
+        report["estimated_point_lat_lon"] = to_geographic(best_fit["xyz_m"]).tolist()
     return finish(*reasons)
 
 
@@ -221,17 +272,18 @@ def evaluate(output, reference):
     import json
 
     report = json.loads((output / "inference.json").read_text(encoding="utf-8"))
+    geodetic_to_ecef(*reference, ELLIPSOID_HEIGHT_M)
     result = {"reference_lat_lon": reference, "arm": report["arm"], "status": report["status"]}
     for field in ("diagnostic", "estimated"):
         point = report.get(f"{field}_point_lat_lon")
-        error = None
-        if point is not None:
-            a, b = np.deg2rad(reference), np.deg2rad(point)
-            haversine = np.sin((a[0] - b[0]) / 2)**2 + np.cos(a[0]) * np.cos(b[0]) * np.sin((a[1] - b[1]) / 2)**2
-            error = float(6371008.8 * 2 * np.arcsin(np.sqrt(np.clip(haversine, 0, 1))))
+        error = great_circle_m(reference, point) if point is not None else None
         result[f"{field}_great_circle_error_m"] = error
     accepted = result["estimated_great_circle_error_m"]
     result["hit_within_1000_m"] = accepted is not None and accepted <= 1000
+    name = output / "result-map-with-reference.html"
+    if name.exists():
+        raise ValueError("Remove the existing evaluated map or choose an unevaluated run directory")
+    _render_map(output, report, published_reference=reference)
     _write_json(output / "evaluation.json", result)
     return result
 
@@ -256,7 +308,7 @@ def main():
     if args.action == "infer":
         report = infer(args.audio, args.adsb, args.arm, args.output, args.budget_s,
                        args.detector, args.final_spacing_m)
-        result = {key: report.get(key) for key in ("arm", "status", "ridges_selected", "reasons", "wall_s")}
+        result = {key: report.get(key) for key in ("arm", "status", "ridges_selected", "diagnostic_candidate", "estimated_point_lat_lon", "reasons", "wall_s")}
     else:
         result = evaluate(args.output, args.reference)
     print(json.dumps(result, indent=2))

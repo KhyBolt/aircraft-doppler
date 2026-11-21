@@ -12,7 +12,7 @@ import pandas as pd
 
 from .io import load_tracks
 from .physics import geodetic_to_ecef
-from .result_map import read_scored_grids, write_evaluated_grid, write_result_map
+from .result_map import diagnostic_candidate, read_scored_grids, write_evaluated_grid, write_result_map
 from .wide import BudgetExceeded, CLOCK_HALF_S, EDGE_M, SURVEY_M, XYZ, _sha256, infer
 
 
@@ -51,11 +51,18 @@ def _lat_lon(point):
     return np.stack((np.rad2deg(lat), np.rad2deg(np.arctan2(y, x))), axis=-1).tolist()
 
 
-def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0, max_seconds=120):
+def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0, max_seconds=120, published_reference=None):
     """Run the guarded two-pass profile with a local flat-height prior."""
     start = perf_counter()
     anchor = _utc(start_utc)
     origin, enu = _local_frame(area_center)
+    if published_reference is not None:
+        # Validate before running; this point is never used by the solver.
+        geodetic_to_ecef(*published_reference, area_center[2])
+
+    def to_lat_lon(points):
+        return _lat_lon(np.asarray(points) @ enu + origin)
+
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
@@ -89,19 +96,21 @@ def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0
             fit = infer(audio, track_csv, grid_csv, guarded, hardened=True,
                         channel=channel, deadline=start + max_seconds)
         except BudgetExceeded as error:
-            fit = {"status": "timed_out", "abstention_reasons": [str(error)]}
+            partial = guarded / "inference.json"
+            fit = (json.loads(partial.read_text(encoding="utf-8")) if partial.is_file()
+                   else {"status": "timed_out", "abstention_reasons": [str(error)]})
         grids = read_scored_grids(guarded)
 
     ridges = fit.get("audio_only_detection", fit.get("audio_audit", {}).get("accepted", []))
     result = {
-        "status": "abstained",
+        "status": "timed_out" if fit["status"] == "timed_out" else "abstained",
         "supplied_start_utc": anchor.isoformat(),
         "clock_half_width_s": CLOCK_HALF_S,
         "area_center_lat_lon_ellipsoid_m": list(area_center),
         "area_width_m": 2 * EDGE_M,
         "channel": channel,
         "recording_duration_s": fit.get("recording_duration_s"),
-        "ridges_detected": None if fit["status"] == "timed_out" else len(ridges),
+        "ridges_detected": None if fit["status"] == "timed_out" and "audio_audit" not in fit else len(ridges),
         "track_segments": len(catalogue),
         "abstention_reasons": fit.get("abstention_reasons", []),
     }
@@ -118,10 +127,12 @@ def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0
             "estimated_audio_start_utc": datetime.fromtimestamp(
                 anchor.timestamp() + fit["estimated_clock_offset_s"], timezone.utc).isoformat(),
         })
+    result["diagnostic_candidate"] = diagnostic_candidate(
+        fit.get("best_fit_diagnostic"), to_lat_lon, result["status"])
     with (output / "inference.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")
     write_evaluated_grid(output / "evaluated-grid.json", grids, result)
-    write_result_map(output / "result-map.html", result, fit, grids, track_geometry,
-                     lambda points: _lat_lon(np.asarray(points) @ enu + origin))
+    write_result_map(output / "result-map.html", result, fit, grids, track_geometry, to_lat_lon,
+                     published_reference=published_reference)
     return result
