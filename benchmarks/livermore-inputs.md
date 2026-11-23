@@ -1,10 +1,19 @@
 # Livermore diagnostic inputs
 
-The [live portfolio replay](https://khybolt.github.io/doppler/#livermore)
-uses the separately rerun adsb.lol-only score overlay. Its recorded
-top estimate was 320.619 m from the study-reported phone position, and the
-matching ordered pair ranked first of 17,101. The locked verifier returned
-zero acoustic survivors. The phone position has no independent survey bound.
+This guide verifies the WAV and archive inputs for the earlier full-day
+adsb.lol-only Livermore search. Its top candidate was 320.619 m (about 321 m)
+from the study-reported phone position, and the matching ordered pair ranked
+first of 17,101. The verifier abstained with zero acoustic survivors.
+
+The [Livermore portfolio map](https://khybolt.github.io/doppler/#livermore)
+shows a separate assisted diagnostic, not that search. It used the study's
+supplied hand-guided pitch traces and matching flight tracks, with a fixed
+nominal UTC start for each clip. Its top candidate was about 144 m from the
+same reference. This replay also abstained. The
+[assisted map data](https://khybolt.github.io/doppler/assets/livermore/livermore-assisted-real-audio-map-v1.json)
+pins solver revision `2c4b48ab7fbc7a1cd94a3f2c3ea7ef8bee848633`. Neither
+distance is a verified accuracy measurement; the phone position has no
+independent survey bound.
 
 ## Verify the inputs
 
@@ -29,7 +38,7 @@ The members are lossless copies from `raw_flight_data.zip`, unchanged.
 | `N9393T_R02_2026-05-17T22-03-02.336Z.wav` | `7834bad6d620df2143b396325fd861d6581d5ad25dd9bcfa997eb953d13a65f5` |
 | `N86LP_R01_2026-05-17T22-20-09.578Z.wav` | `a19c78d9d147a6e8b4b2c495bd344787363875ea411e3af21b59490517832495` |
 
-Both WAVs are 48 kHz mono. The benchmark supplied a date and the exact
+Both WAVs are 48 kHz mono. The adsb.lol search used a date and the exact
 1,027.242 s gap between first samples from the published timestamps, along
 with the 10 × 10 km airport-centered area. Absolute clip timestamps,
 publisher-traced ridges, and known aircraft identities were withheld from the
@@ -53,13 +62,13 @@ whose SHA-256 is `82ecd7388ae1bef4286c6fbb2459da67d6e495d74c2e333e279f9a926af73b
 The two changed call sites invoke the existing direct imports `urlencode`
 and `urlopen`. The original `--check` otherwise fails before its first request.
 
-## Recorded search and controls
+## Earlier adsb.lol search and controls
 
-The portfolio receipt documents a 1 km ENU search lattice, 2 s coarse
+The adsb.lol search receipt documents a 1 km ENU search lattice, 2 s coarse
 clock stride, 30 s clock buckets, 2 km retention tiles, 24 refinement seeds,
 and 343 m/s sound speed. It specifies automatic harmonic extraction and a
-locked held-out split. Consult the [recorded replay method](https://khybolt.github.io/doppler/assets/livermore/replay-method.md)
-and [machine-readable receipt](https://khybolt.github.io/doppler/assets/livermore/overlay-metadata.json).
+locked held-out split. See the [adsb.lol replay method](https://khybolt.github.io/doppler/assets/livermore/replay-method.md)
+and its [machine-readable receipt](https://khybolt.github.io/doppler/assets/livermore/overlay-metadata.json).
 
 | Arm | Published pair rank | Diagnostic distance | Held-out pass blocks | Acoustic survivors |
 | --- | ---: | ---: | --- | ---: |
@@ -72,9 +81,9 @@ and timing on these same WAVs. Attribute it to
 [Michael Higgins's DopplerTrack](https://github.com/mjshiggins/dopplertrack).
 The comparator is outside this input verifier.
 
-## Release blocker and map artifacts
+## Reproduction limits and archived map artifacts
 
-Full reconstruction requires solver
+Reproducing the 321 m search requires solver
 `e963ab83dccd5a205f3b16558bd90d4307bc38b6`,
 clock screen `5c361a53653d47f203ec69521542f3cf6955e63f`,
 and the exact adsb.lol-only invocation and report-only score hook. Both
@@ -83,7 +92,7 @@ for the earlier UTC-day screen and imports both revisions. The exact
 invocation used for the single-provider rerun and its report hook remain
 unverified. The input tools only verify the WAVs and archive manifests.
 
-The live [score raster](https://khybolt.github.io/doppler/assets/livermore/livermore-adsblol-coarse-score.png)
+The earlier search's [coarse score raster](https://khybolt.github.io/doppler/assets/livermore/livermore-adsblol-coarse-score.png)
 is a 768 × 768 EPSG:3857 image. Its SHA-256 is
 `32598daaaf98fa787898821b2c70348c52c4228176a32bac449b329151ffa9ab`.
 Use the receipt's `image_corners_wgs84_lon_lat` in northwest, northeast,
@@ -91,5 +100,5 @@ southeast, southwest order. The [WGS84 search boundary](https://khybolt.github.i
 is a closed polygon with 41 listed positions. The 121 observed nodes carry
 the minimum equal-weight training frequency MSE in Hz². The PNG maps the
 nearest node to one of six documented color bins and has transparent pixels
-outside the boundary. Exact per-node values and a fit point are absent from
-the live assets.
+outside the boundary. The archived adsb.lol assets do not include exact
+per-node values or the refined candidate's coordinates.

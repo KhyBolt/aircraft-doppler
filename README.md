@@ -136,15 +136,22 @@ The [Eclipse Soundscapes 505 benchmark](benchmarks/eclipse-505-protocol.md)
 documents an executable replay on licensed audio and historical tracks.
 All completed arms abstained.
 
-The saved [Livermore diagnostic](https://khybolt.github.io/doppler/#livermore)
+The earlier [Livermore adsb.lol search](https://khybolt.github.io/doppler/assets/livermore/replay-method.md)
 used two public research WAVs, their exact relative start gap, a date, and
 a 10 × 10 km prior. The matching pair ranked first of 17,101. The leading
-estimate was 321 m from the study-reported phone position. The verifier
-abstained after the second pass failed its held-out checks. The reference
-has no independent survey bound.
+candidate was 321 m from the study-reported phone position, but the verifier
+abstained after the second pass failed its held-out checks.
+
+The [Livermore portfolio map](https://khybolt.github.io/doppler/#livermore)
+shows a separate assisted replay. It used the study's supplied pitch traces,
+matching flight tracks, and nominal clip start times. Its best-fit candidate
+was 144 m from the same reference, and this replay also abstained. Neither
+distance is a verified accuracy measurement; the reference has no independent
+survey bound.
 
 The [Livermore input guide](benchmarks/livermore-inputs.md) verifies the
-original WAVs and archive receipts. Recomputing the saved result requires
-the private solver and clock-screen revisions and the exact run hook.
+original WAVs and archive receipts, not the 321 m result. Recomputing that
+search requires the unavailable solver and clock-screen revisions, the exact
+adsb.lol-only invocation, and the report-only score hook.
 
 [Source and data credits](RIGHTS.md)
