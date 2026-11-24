@@ -13,6 +13,31 @@ from aircraft_doppler.wide import (CLOCKS, Profile, _trace_loss, _minima, _modes
 
 
 class WideSyntheticTests(unittest.TestCase):
+    def test_pair_search_seeds_shared_subsecond_interval(self):
+        observer = (0, 0, 0)
+        tracks = []
+        events = []
+        for index, start in enumerate((0., 100.)):
+            times = start + np.arange(33.)
+            track = Track(f"pass-{index}", times, np.column_stack((75*(times-start-16),
+                          np.full_like(times, 900+300*index), np.full_like(times, 800))))
+            curve = forward_curve(track, observer)
+            audio_times = np.linspace(curve.arrival_s[0]-.3, curve.arrival_s[-1]-.7, 52)
+            frequencies = 120*np.interp(audio_times+.5, curve.arrival_s, curve.ratio)
+            tracks.append(track)
+            events.append(Event((audio_times[0], audio_times[-1]), audio_times[26], (115, 125, .2),
+                                trace_points=np.column_stack((audio_times, frequencies)).tolist()))
+        winner = Profile(tracks, events, clock_half_s=1).table([observer]).iloc[0]
+        self.assertEqual(winner.flight_pair, "pass-0|pass-1")
+        self.assertAlmostEqual(winner.clock_offset_s, .5)
+        self.assertAlmostEqual(winner.loss_hz2, 0)
+        second = events[1]
+        shifted_trace = np.asarray(second.trace_points) + [-.5, 0]
+        events[1] = Event((second.window_s[0]-.5, second.window_s[1]-.5), second.cpa_audio_s-.5,
+                          second.f0_hz, trace_points=shifted_trace.tolist())
+        self.assertFalse(Profile(tracks, events[1:], clock_half_s=1).table([observer]).empty)
+        self.assertTrue(Profile(tracks, events, clock_half_s=1).table([observer]).empty)
+
     def test_global_clock_bounds_and_exact_frequency_profile(self):
         self.assertEqual(len(CLOCKS),161)
         self.assertEqual(tuple(CLOCKS[[0,-1]]),(-80.,80.))

@@ -57,8 +57,8 @@ def _decode_media(path):
         return wavfile.read(out)
 
 
-def read_audio(path, target_rate=2000, channel=0):
-    """Read PCM WAV directly, or use FFmpeg for the first media audio stream."""
+def read_audio(path, target_rate=2000, channel=0, *, include_duration=False):
+    """Read PCM WAV or the first media audio stream, optionally returning native duration."""
     path = Path(path)
     if not isinstance(target_rate, (int, np.integer)) or target_rate < 1:
         raise ValueError("Target sample rate must be a positive integer")
@@ -75,6 +75,7 @@ def read_audio(path, target_rate=2000, channel=0):
         sr, x = _decode_media(path)
     if not len(x):
         raise ValueError(f"Audio stream contains no samples: {path}")
+    duration_s = len(x) / sr
     if x.ndim == 1 and channel != 0:
         raise ValueError("Only channel 0 exists in mono audio")
     if x.ndim > 1:
@@ -91,6 +92,8 @@ def read_audio(path, target_rate=2000, channel=0):
     if sr != target_rate:
         divisor = math.gcd(int(sr), int(target_rate))
         x = resample_poly(x, target_rate//divisor, sr//divisor)
+    if include_duration:
+        return target_rate, x, duration_s
     return target_rate, x
 
 

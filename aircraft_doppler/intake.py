@@ -51,9 +51,20 @@ def _lat_lon(point):
     return np.stack((np.rad2deg(lat), np.rad2deg(np.arctan2(y, x))), axis=-1).tolist()
 
 
-def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0, max_seconds=120, published_reference=None):
-    """Run the guarded two-pass profile with a local flat-height prior."""
+def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0, max_seconds=120,
+                     published_reference=None, second_audio=None, clip_gap_s=None,
+                     area_width_km=2 * EDGE_M // 1000, time_radius_s=CLOCK_HALF_S):
+    """Run the guarded profile on one recording or two timed clips."""
     start = perf_counter()
+    if second_audio is None and clip_gap_s is not None:
+        raise ValueError("--clip-gap-s requires --second-audio")
+    if second_audio is not None and (clip_gap_s is None or not np.isfinite(clip_gap_s) or clip_gap_s <= 0):
+        raise ValueError("--second-audio requires a positive, finite --clip-gap-s")
+    if not isinstance(area_width_km, int) or not 1 <= area_width_km <= 30:
+        raise ValueError("--area-width-km must be a whole number from 1 to 30")
+    if not isinstance(time_radius_s, int) or not 1 <= time_radius_s <= 3600:
+        raise ValueError("--time-radius-s must be a whole number from 1 to 3600")
+    edge_m = area_width_km * 500
     anchor = _utc(start_utc)
     origin, enu = _local_frame(area_center)
     if published_reference is not None:
@@ -89,12 +100,14 @@ def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0
         track_csv = scratch / "tracks.csv"
         grid_csv = scratch / "candidates.csv"
         pd.concat(local_tracks).to_csv(track_csv, index=False)
-        lattice = range(-EDGE_M, EDGE_M + 1, SURVEY_M)
+        lattice = range(-edge_m, edge_m + 1, SURVEY_M)
         pd.DataFrame(product(lattice, lattice, (0,)), columns=XYZ).to_csv(grid_csv, index=False)
         guarded = scratch / "guarded"
         try:
             fit = infer(audio, track_csv, grid_csv, guarded, hardened=True,
-                        channel=channel, deadline=start + max_seconds)
+                        channel=channel, deadline=start + max_seconds, field_detection=True,
+                        second_audio_path=second_audio, clip_gap_s=clip_gap_s,
+                        edge_m=edge_m, clock_half_s=time_radius_s)
         except BudgetExceeded as error:
             partial = guarded / "inference.json"
             fit = (json.loads(partial.read_text(encoding="utf-8")) if partial.is_file()
@@ -105,9 +118,9 @@ def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0
     result = {
         "status": "timed_out" if fit["status"] == "timed_out" else "abstained",
         "supplied_start_utc": anchor.isoformat(),
-        "clock_half_width_s": CLOCK_HALF_S,
+        "clock_half_width_s": time_radius_s,
         "area_center_lat_lon_ellipsoid_m": list(area_center),
-        "area_width_m": 2 * EDGE_M,
+        "area_width_m": 2 * edge_m,
         "channel": channel,
         "recording_duration_s": fit.get("recording_duration_s"),
         "ridges_detected": None if fit["status"] == "timed_out" and "audio_audit" not in fit else len(ridges),
@@ -116,6 +129,11 @@ def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0
     }
     if "inputs_sha256" in fit:
         result["input_sha256"] = {"audio": fit["inputs_sha256"]["wav"], "tracks": _sha256(Path(tracks))}
+        if "second_wav" in fit["inputs_sha256"]:
+            result["input_sha256"]["second_audio"] = fit["inputs_sha256"]["second_wav"]
+    if second_audio is not None:
+        result["clip_start_gap_s"] = clip_gap_s
+        result["clip_durations_s"] = fit.get("clip_durations_s")
     if fit["status"] == "supported_in_this_fixture":
         point = np.asarray(fit["estimated_xyz_m"])
         result.update({
@@ -129,6 +147,18 @@ def locate_recording(audio, tracks, start_utc, area_center, output, *, channel=0
         })
     result["diagnostic_candidate"] = diagnostic_candidate(
         fit.get("best_fit_diagnostic"), to_lat_lon, result["status"])
+    if result["status"] == "timed_out":
+        result["outcome"] = "time_budget_reached"
+    elif result["status"] == "supported_under_model":
+        result["outcome"] = "estimate_supported"
+    elif result["diagnostic_candidate"] is not None:
+        result["outcome"] = "candidate_found"
+    elif result["ridges_detected"] == 0:
+        result["outcome"] = "no_supported_ridge"
+    else:
+        result["outcome"] = "no_candidate"
+    if "audio_audit" in fit:
+        result["audio_audit"] = fit["audio_audit"]
     with (output / "inference.json").open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2, allow_nan=False)
         stream.write("\n")

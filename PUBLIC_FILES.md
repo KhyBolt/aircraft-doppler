@@ -29,8 +29,11 @@ This list defines the publishable file set. It contains only reviewed source, ge
 - benchmarks/eclipse-505-protocol.md
 - benchmarks/eclipse_replay.py
 - benchmarks/livermore-inputs.md
+- benchmarks/livermore-replay.md
 - benchmarks/livermore_archive.py
+- benchmarks/livermore_denominator.py
 - benchmarks/livermore_inputs.py
+- benchmarks/livermore_replay.py
 - benchmarks/plot_eclipse.py
 - benchmarks/range_wav.py
 - demo_replay.py
@@ -56,6 +59,7 @@ This list defines the publishable file set. It contains only reviewed source, ge
 - requirements-verified.txt
 - tests/test_corroboration.py
 - tests/test_intake.py
+- tests/test_livermore_replay.py
 - tests/test_physics.py
 - tests/test_review.py
 - tests/test_result_map.py

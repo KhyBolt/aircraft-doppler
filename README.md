@@ -10,6 +10,11 @@ Use Python 3.12 with the versions pinned for validation. Run the commands
 from the repository root.
 
 ~~~sh
+git clone https://github.com/KhyBolt/aircraft-doppler.git
+cd aircraft-doppler
+~~~
+
+~~~sh
 python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-verified.txt
@@ -21,24 +26,33 @@ and video such as MP4.
 
 ## Analyze a local recording
 
-The experimental `locate` command looks for two separated flyovers in a
-recording you made or have permission to analyze. Supply a regional
-civilian flight catalogue, an approximate UTC time for the first decoded
-audio sample, and the center and receiver ellipsoid height of a flat
-10 × 10 km search area.
+The experimental `locate` command looks for two flyovers in a continuous
+recording or in two separate clips you made or have permission to analyze.
+The recorder must stay in the same place. For two clips, use one clear
+flyover per clip and put the earlier clip first. The clips must not overlap.
 
-~~~sh
-python -m aircraft_doppler locate \
-  --audio recording.mp4 --tracks regional.csv \
-  --start-utc 2024-04-07T16:34:18Z \
-  --area-center LAT LON ELLIPSOID_HEIGHT_M \
-  --output runs/local
+~~~text
+python -m aircraft_doppler locate --audio first.wav --second-audio second.wav --clip-gap-s 180.25 --tracks regional.csv --start-utc 2026-05-17T22:03:00Z --time-radius-s 120 --area-center 37.69 -121.82 90 --area-width-km 8 --output runs/local
 ~~~
 
-The search allows ±80 seconds around the supplied audio start. If a
-video's audio starts later than its picture, use the audio start. The
-decoder uses the first audio stream and channel 0 by default. Set
-`--channel` to choose a different channel within that stream.
+Replace the example inputs with your own:
+
+- `--clip-gap-s` is the elapsed time from the first audio sample of the first clip to the first audio sample of the second clip. It is not the silence between files. The search shifts both starts together; it does not fit the gap.
+- `--start-utc` is the approximate start of the first clip, with a time zone. `--time-radius-s 120` searches two minutes on either side (default ±80 seconds; 1–3,600 seconds allowed). For video, use the start of the audio, not the picture.
+- `--area-center` takes latitude, longitude, and the assumed recorder height above the WGS84 ellipsoid, in metres. `--area-width-km` is the full side length of the square (default 10 km; 1–30 whole km allowed). The search uses a flat local plane at that height, not terrain elevation.
+- `--tracks` is a local ADS-B track CSV. `locate` does not download tracks. Supply regional tracks for both flyovers, covering both audio windows across your time uncertainty and allowing for sound travel time.
+
+For a continuous recording, omit `--second-audio` and `--clip-gap-s`:
+
+~~~text
+python -m aircraft_doppler locate --audio recording.mp4 --tracks regional.csv --start-utc 2026-05-17T22:03:00Z --area-center 37.69 -121.82 90 --output runs/continuous
+~~~
+
+The decoder uses the first audio stream and channel 0 by default. Set
+`--channel` to use a different zero-based channel in every input file.
+Start with a small area and time window; wider searches may need a larger
+`--max-seconds` budget. The [full-day Livermore replay](benchmarks/livermore-replay.md)
+uses a separate script and detector tuned on those clips.
 
 Prepare a local CSV with
 `flight_id,time_s,latitude,longitude,altitude_ellipsoid_m`. Use Unix UTC
@@ -48,7 +62,14 @@ segments of the same airframe. The optional `engine` column accepts
 `propeller`, `jet`, or `unknown`. The command runs offline.
 
 The output directory must be new or empty. Exit 0 reports an estimate that
-passed the model's checks. Exit 2 covers abstention or invalid input.
+passed the model's checks. Exit 2 means no supported estimate was returned
+(or the input was invalid). Read `outcome` in the JSON to distinguish a
+candidate found, no supported ridge, no candidate, and time budget reached.
+`locate` looks for ridges across multiple frequency bands and near clip edges.
+A single ridge can produce a diagnostic candidate but cannot verify a location.
+The `audio_audit` records which proposals were selected or rejected and why.
+The held-out check tests a locked fit on separate time blocks of the selected
+ridges. It checks the fit conditional on those ridges, not independent ridge discovery.
 A completed run writes `runs/local/inference.json` and
 `runs/local/result-map.html`. Open the HTML in a browser to pan, zoom, and
 inspect the search boundary, sampled fit scores, and selected flight paths.
@@ -77,6 +98,21 @@ The HTML works offline. You can enable USGS topographic tiles in the browser
 when they are available. The offline grid and result layers remain usable
 without them. The HTML contains location and flight geometry, so share it only
 with people who can receive those details.
+
+### Related implementations
+
+- [DopplerTrack](https://github.com/mjshiggins/dopplertrack) fits straight-pass templates and can score whether a ridge stands out from nearby alternatives. Its experiments also show how a bad search prior or an overly strict early filter can discard the right track.
+- [digitalis-p/doppler-locate](https://github.com/digitalis-p/doppler-locate) is a Python alternative that proposes curves from log-frequency templates and groups harmonics before refitting.
+- [dopplerprint](https://github.com/Hexay/dopplerprint) detects harmonic families with a tracker that can restart rather than forcing one continuous path through a crop. This is the strongest candidate for a side-by-side detector test.
+- [AircraftWitness](https://github.com/nyu-kr/aircraftwitness) builds on dopplerprint and uses shifted-time controls. It is an evaluation reference, not an independent detector baseline.
+- [Cobez02/doppler-locator](https://github.com/Cobez02/doppler-locator/tree/438c1b77699a6f4f8c49d0d1227dc6224c8fea61) searches for harmonic families and isolated tones with a tracker that can pause through fades. It distinguishes tentative points and one-pass lines from accepted locations.
+- [Cinna Davis's DOPPLERGEIST](https://github.com/1337isnot1337/DOPPLERGEIST/tree/a033f83574a450cb1837bf7c5acfa8b6550634cc) tests multiresolution curve proposals, counts related harmonics as one group, and reports ranked points even when the result is inconclusive. The reviewed revision uses the PolyForm Noncommercial license.
+
+Compare detectors on the same frozen WAVs, time and area priors, and track
+catalogue, with whole sites or dates held out and audibility checked by a
+reviewer. Measure ridge coverage, false alerts, track rank, false accepts and
+runtime separately. Supplied-track, hand-traced and archive-search results are
+not directly comparable. The solver does not include code from the compared implementations.
 
 `--max-seconds` sets the cooperative search budget. Decoding and input
 preparation can also take time. After a timeout only positions that finished scoring are exported, including
@@ -142,12 +178,14 @@ a 10 × 10 km prior. The matching pair ranked first of 17,101. The leading
 candidate was 321 m from the study-reported phone position, but the verifier
 abstained after the second pass failed its held-out checks.
 
-The [Livermore portfolio map](https://khybolt.github.io/doppler/#livermore)
-shows a separate assisted replay. It used the study's supplied pitch traces,
-matching flight tracks, and nominal clip start times. Its best-fit candidate
-was 144 m from the same reference, and this replay also abstained. Neither
-distance is a verified accuracy measurement; the reference has no independent
-survey bound.
+The [Livermore case study](https://khybolt.github.io/doppler/#livermore)
+shows a newer replay that extracts pitch from the original recordings and
+searches the full day without supplied flight matches. The matching pair
+ranked first of 12,215 covered ordered pairs. The best fit was about 405 m
+from the study's phone position and did not pass verification. The separate
+assisted replay in the input guide is not part of either full-day ranking.
+See the [automatic replay instructions](benchmarks/livermore-replay.md)
+to reproduce the newer result and its controls.
 
 The [Livermore input guide](benchmarks/livermore-inputs.md) verifies the
 original WAVs and archive receipts, not the 321 m result. Recomputing that

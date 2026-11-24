@@ -165,7 +165,9 @@ const km = value => (value / 1000).toLocaleString(undefined, {maximumFractionDig
 
 function populate() {
   setText("assessment", data.accepted ? "Estimate supported" :
-    data.status === "timed_out" ? "Time budget reached" : "Location abstained");
+    data.status === "timed_out" ? "Time budget reached" :
+    data.diagnostic_candidate ? "Best-fit candidate found" :
+    data.audio_ridges === 0 ? "No supported flyover ridge" : "No location candidate");
   byId("assessment").classList.toggle("supported", data.accepted);
   setText("assessment-note", data.accepted
     ? "Conditional on the supplied track catalogue and the model’s checks."
@@ -197,7 +199,7 @@ function populate() {
 
   setText("boundary-note", "Dashed boundary · " + km(data.area_width_m) + " × " + km(data.area_width_m) + " km search area");
   setText("heat-note", data.grid.length
-    ? "Minimum training MSE across eligible track pairs (Hz²). Lower fits better. These sampled scores carry no location probability."
+    ? "Minimum fitted pitch error (MSE, Hz²) across eligible track hypotheses. Lower fits better. These sampled scores carry no location probability."
     : "Unavailable. No finite grid scores were produced.");
   heat.disabled = !data.grid.length;
   heat.checked = !heat.disabled;
@@ -231,7 +233,7 @@ function populate() {
   const tracksLabel = data.accepted ? "Selected catalogue segments." : "Leading diagnostic track hypothesis. Association unverified.";
   setText("tracks-note", data.tracks.length
     ? tracksLabel + (data.tracks.length < 2 ? " One track is unavailable." : "")
-    : "Unavailable. The run did not identify a usable track pair.");
+    : "Unavailable. No track hypothesis produced a candidate.");
   tracks.disabled = !data.tracks.length;
   tracks.checked = !tracks.disabled;
   byId("fit-tracks").disabled = tracks.disabled;

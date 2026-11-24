@@ -12,8 +12,11 @@ import numpy as np
 from scipy.io import wavfile
 
 from aircraft_doppler.audio import read_audio
+from aircraft_doppler.benchmark import _write_json
 from aircraft_doppler.cli import main
 from aircraft_doppler.intake import _utc
+from aircraft_doppler.physics import Track, forward_curve, geodetic_to_ecef
+from aircraft_doppler.search import Event
 from aircraft_doppler.wide import BudgetExceeded
 from test_result_map import map_data
 
@@ -129,6 +132,8 @@ class RecordingIntakeTests(unittest.TestCase):
             result = json.loads(stdout)
             self.assertEqual(result, json.loads((out / "inference.json").read_text()))
             self.assertEqual(result["status"], "abstained")
+            self.assertEqual(result["outcome"], "no_supported_ridge")
+            self.assertEqual((result["area_width_m"], result["clock_half_width_s"]), (10000, 80))
             self.assertEqual(result["ridges_detected"], 0)
             self.assertIn("0 passed", result["abstention_reasons"][0])
             self.assertFalse(any(key.startswith("estimated_") for key in result))
@@ -151,10 +156,10 @@ class RecordingIntakeTests(unittest.TestCase):
             tracks = path / "tracks.csv"
             tracks.write_text("flight_id,time_s,latitude,longitude,altitude_ellipsoid_m\n" +
                               "".join(f"sim-a,{1712507658+i},5,{5+.0003*i},1050\n" for i in range(7)))
-            for mode, public_status, candidate_status in (
-                ("abstained", "abstained", "not_accepted"),
-                ("timed_out", "timed_out", "partial_fit_not_accepted"),
-                ("supported_in_this_fixture", "supported_under_model", "also_supported"),
+            for mode, public_status, candidate_status, outcome in (
+                ("abstained", "abstained", "not_accepted", "candidate_found"),
+                ("timed_out", "timed_out", "partial_fit_not_accepted", "time_budget_reached"),
+                ("supported_in_this_fixture", "supported_under_model", "also_supported", "estimate_supported"),
             ):
                 with self.subTest(mode=mode):
                     out = path / mode
@@ -181,6 +186,7 @@ class RecordingIntakeTests(unittest.TestCase):
                     result = json.loads(stdout)
                     data = map_data(out/"result-map.html")
                     self.assertEqual(result["status"], public_status)
+                    self.assertEqual(result["outcome"], outcome)
                     self.assertEqual(exit_code, 0 if public_status == "supported_under_model" else 2)
                     candidate = result["diagnostic_candidate"]
                     self.assertEqual(candidate["status"], candidate_status)
@@ -199,6 +205,166 @@ class RecordingIntakeTests(unittest.TestCase):
                     else:
                         self.assertNotIn("estimated_lat_lon", result)
                         self.assertIsNone(data["receiver"])
+
+    def test_locate_scores_one_ridge_without_releasing_a_fix(self):
+        epoch = 1712507658
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            audio = path / "audio.wav"
+            wavfile.write(audio, 8000, np.tile(tone(120), 20))
+            tracks = path / "tracks.csv"
+            times = np.arange(44.)
+            tracks.write_text("flight_id,time_s,latitude,longitude,altitude_ellipsoid_m\n" +
+                              "".join(f"pass,{epoch+index},0.008,{(index-21)*.00065},800\n" for index in range(44)))
+            track = Track("pass", times, np.column_stack((72.36*(times-21),
+                          np.full_like(times, 884.6), np.full_like(times, 800))))
+            curve = forward_curve(track, (0, 0, 0))
+            audio_times = np.arange(10., 36., .5)
+            frequencies = 120*np.interp(audio_times, curve.arrival_s, curve.ratio)
+            event = Event((10., 35.5), 24., (115, 125, .2),
+                          trace_points=np.column_stack((audio_times, frequencies)).tolist())
+            proposal = {"band_hz": [60, 200]}
+            with patch("aircraft_doppler.wide.detect_field_events", return_value=(
+                    [event], {"selected": [proposal], "supported_proposals": [proposal], "rejected": []})) as detector:
+                code, stdout, stderr = invoke(
+                    "locate", "--audio", audio, "--tracks", tracks, "--output", path/"out",
+                    "--start-utc", "2024-04-07T16:34:18Z", "--area-center", "0", "0", "0")
+            detector.assert_called_once()
+            self.assertEqual((code, stderr), (2, ""))
+            report = json.loads(stdout)
+            self.assertEqual(report["outcome"], "candidate_found")
+            self.assertEqual(report["ridges_detected"], 1)
+            self.assertEqual(report["audio_audit"]["selected"], [proposal])
+            self.assertIsNotNone(report["diagnostic_candidate"])
+            self.assertFalse(any(key.startswith("estimated_") for key in report))
+
+
+class TwoClipIntakeTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.first = self.root / "first.wav"
+        self.second = self.root / "second.wav"
+        self.tracks = self.root / "tracks.csv"
+        self.epoch = 1712507658
+
+    def locate(self, output, *options):
+        return invoke("locate", "--audio", self.first, "--tracks", self.tracks,
+                      "--start-utc", "2024-04-07T16:34:18Z", "--area-center", "0", "0", "0",
+                      "--output", self.root / output, *options)
+
+    def test_locate_rejects_invalid_clip_options_and_bounds(self):
+        cases = [(("--clip-gap-s", 3), "--clip-gap-s requires --second-audio"),
+                 (("--second-audio", self.second), "positive, finite --clip-gap-s")]
+        cases.extend((("--second-audio", self.second, "--clip-gap-s", gap), "positive, finite --clip-gap-s")
+                     for gap in (0, -1, "nan", "inf"))
+        for option, above_maximum in (("--area-width-km", 31), ("--time-radius-s", 3601)):
+            cases.extend(((option, value), f"{option} must be a whole number") for value in (0, above_maximum))
+            cases.append(((option, "1.5"), f"{option}: invalid int value"))
+        for options, message in cases:
+            with self.subTest(options=options):
+                code, stdout, stderr = self.locate("invalid", *options)
+                self.assertEqual((code, stdout), (2, ""))
+                self.assertIn(message, stderr)
+                self.assertNotIn("Traceback", stderr)
+
+    def test_locate_rejects_overlapping_clips_but_allows_adjacent_clips(self):
+        sample_rate = 8000
+        first_samples = np.append(tone(120), np.int16(0))
+        first_duration = len(first_samples) / sample_rate
+        wavfile.write(self.first, sample_rate, first_samples)
+        wavfile.write(self.second, sample_rate, tone(220))
+        self.tracks.write_text("flight_id,time_s,latitude,longitude,altitude_ellipsoid_m\n" +
+                               "".join(f"first-pass,{self.epoch + index},0.006,{index*.00065},800\n"
+                                       for index in range(4)))
+        options = ("--second-audio", self.second, "--area-width-km", 1)
+        code, stdout, stderr = self.locate("overlap", *options, "--clip-gap-s", 3)
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertIn("clips must not overlap", stderr)
+
+        code, stdout, stderr = self.locate("adjacent", *options, "--clip-gap-s", first_duration)
+        self.assertEqual((code, stderr), (2, ""))
+        report = json.loads(stdout)
+        self.assertEqual(report["clip_start_gap_s"], first_duration)
+        self.assertEqual(report["clip_durations_s"], [first_duration, 3])
+        self.assertEqual(report["recording_duration_s"], first_duration + 3)
+        self.assertEqual(report["outcome"], "no_supported_ridge")
+
+    def test_locate_shifts_independent_ridges_and_fits_one_clock_within_custom_bounds(self):
+        gap = 91.25
+        clock = 3
+        trace_times = np.arange(3., 43., .25)
+        emission_times = np.arange(43.)
+        displacement = (emission_times - 23) * .00065
+        rows = ["flight_id,time_s,latitude,longitude,altitude_ellipsoid_m\n"]
+        detections = []
+        for identifier, audio, duration, offset, lat, lon, frequency in (
+                ("first-pass", self.first, 45, 0, np.full_like(displacement, .006), displacement, 120),
+                ("second-pass", self.second, 48, gap, displacement, np.full_like(displacement, -.006), 220)):
+            wavfile.write(audio, 8000, np.column_stack((np.tile(tone(400), duration // 3),
+                                                       np.tile(tone(frequency), duration // 3))))
+            local = (geodetic_to_ecef(lat, lon, 800) - geodetic_to_ecef(0, 0, 0))[:, [1, 2, 0]]
+            times = emission_times + offset
+            rows.extend(f"{identifier},{self.epoch + time},{latitude},{longitude},800\n"
+                        for time, latitude, longitude in zip(times, lat, lon))
+            curve = forward_curve(Track(identifier, times, local), (0, 0, 0))
+            frequencies = frequency * np.interp(trace_times + offset + clock, curve.arrival_s, curve.ratio)
+            event = Event((trace_times[0], trace_times[-1]), 25., (frequency - 2, frequency + 2, .25),
+                          trace_points=np.column_stack((trace_times, frequencies)).tolist())
+            proposal = {"band_hz": [frequency - 2, frequency + 2], "center_audio_s": 25.}
+            detections.append(([event], {"selected": [proposal], "supported_proposals": [proposal], "rejected": []}))
+        self.tracks.write_text("".join(rows))
+
+        def detect(spec, sound_speed, *, max_events):
+            self.assertEqual(max_events, 1)
+            self.assertEqual(spec.t[0], 1.)
+            dominant = spec.f[np.argmax(spec.power.mean(axis=1))]
+            if dominant == 120 and spec.t[-1] == 44.:
+                return detections[0]
+            self.assertEqual((dominant, spec.t[-1]), (220, 47.))
+            return detections[1]
+
+        options = ("--second-audio", self.second, "--channel", 1, "--area-width-km", 1)
+        with (patch("aircraft_doppler.wide.detect_field_events", side_effect=detect) as detector,
+              patch("aircraft_doppler.wide._write_json", wraps=_write_json) as write_json):
+            _, stdout, stderr = self.locate("shared", *options, "--clip-gap-s", gap, "--time-radius-s", 4)
+        self.assertEqual(stderr, "")
+        self.assertEqual(detector.call_count, 2)
+        written = {call.args[0].name: call.args[1] for call in write_json.call_args_list}
+        report = json.loads(stdout)
+        self.assertEqual(report["ridges_detected"], 2)
+        self.assertEqual(report["clip_durations_s"], [45, 48])
+        self.assertEqual(report["recording_duration_s"], 93)
+        self.assertEqual(report["clip_start_gap_s"], gap)
+        self.assertEqual([clip["clip_start_offset_s"] for clip in report["audio_audit"]["clips"]], [0, gap])
+        self.assertEqual([proposal["clip"] for proposal in report["audio_audit"]["selected"]], [1, 2])
+        self.assertIn("second_audio", report["input_sha256"])
+        for serialized, (events, _), offset in zip(written["detected_events.json"], detections, (0, gap)):
+            event = events[0]
+            np.testing.assert_allclose(serialized["window_s"], np.asarray(event.window_s) + offset)
+            self.assertEqual(serialized["cpa_audio_s"], event.cpa_audio_s + offset)
+            np.testing.assert_allclose(serialized["trace_points"], np.asarray(event.trace_points) + [offset, 0])
+        best = written["inference.json"]["best_fit_diagnostic"]
+        self.assertEqual(best["pair"], "first-pass|second-pass")
+        self.assertAlmostEqual(best["clock_offset_s"], clock, delta=.125)
+        self.assertLess(best["loss_hz2"], 1e-6)
+        self.assertEqual((report["area_width_m"], report["clock_half_width_s"]), (1000, 4))
+        grid = json.loads((self.root / "shared" / "evaluated-grid.json").read_text())
+        self.assertEqual(grid["search_half_width_m"], 500)
+        self.assertEqual(grid["stages"][0]["attempted_positions"], 9)
+        for stage in grid["stages"]:
+            self.assertTrue(all(abs(east) <= 500 and abs(north) <= 500 for east, north, *_ in stage["points"]))
+
+        for output, clip_gap, radius in (("tight-clock", gap, 1), ("wrong-gap", gap + 8, 12)):
+            with self.subTest(output=output), patch("aircraft_doppler.wide.detect_field_events", side_effect=detect):
+                code, stdout, stderr = self.locate(output, *options, "--clip-gap-s", clip_gap, "--time-radius-s", radius)
+                self.assertEqual((code, stderr), (2, ""))
+                report = json.loads(stdout)
+                self.assertEqual(report["ridges_detected"], 2)
+                self.assertEqual(report["clock_half_width_s"], radius)
+                self.assertIsNone(report["diagnostic_candidate"])
+                self.assertIn("common clock offset", report["abstention_reasons"][0])
 
 
 if __name__ == "__main__":

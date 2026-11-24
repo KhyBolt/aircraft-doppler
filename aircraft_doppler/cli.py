@@ -53,16 +53,23 @@ def main():
     sp.add_argument("--fmin",type=float,default=40)
     sp.add_argument("--fmax",type=float,default=700)
     locate = sub.add_parser(
-        "locate", help="Find two audio ridges and associate them with a supplied historical catalogue")
+        "locate", help="Find flyover ridges and rank location candidates using a supplied track catalogue")
     locate.add_argument("--audio", required=True, type=Path,
-                        help="Local PCM WAV or FFmpeg-readable audio/video, such as MP3 or MP4")
+                        help="Local PCM WAV or FFmpeg-readable audio/video; first clip when using two files")
+    locate.add_argument("--second-audio", type=Path, help="Optional later clip from the same stationary recorder")
+    locate.add_argument("--clip-gap-s", type=float,
+                        help="Seconds from the first clip's start to the second clip's start")
     locate.add_argument("--tracks", required=True, type=Path,
                         help="Normalized civilian track CSV (flight_id, time_s Unix UTC, latitude, longitude, altitude_ellipsoid_m)")
     locate.add_argument("--start-utc", required=True,
-                        help="Approximate UTC of the first decoded audio sample, with timezone; search ±80 seconds")
+                        help="Approximate UTC of the first decoded audio sample, with timezone")
+    locate.add_argument("--time-radius-s", type=int, default=80, metavar="1..3600",
+                        help="Search this many seconds either side of --start-utc (default: 80)")
     locate.add_argument("--area-center", required=True, nargs=3, type=float,
                         metavar=("LAT", "LON", "ELLIPSOID_HEIGHT_M"),
-                        help="WGS84 center and receiver height for a flat 10 × 10 km local search")
+                        help="WGS84 center and recorder height for a flat square search area")
+    locate.add_argument("--area-width-km", type=int, default=10, metavar="1..30",
+                        help="Full side length of the search square in kilometres (default: 10)")
     locate.add_argument("--published-reference", type=float, nargs=2, metavar=("LAT", "LON"),
                         help="Optional deliberately published benchmark point, shown only on the result map")
     locate.add_argument("--channel", type=int, default=0, help="Zero-based channel in the first audio stream")
@@ -129,7 +136,9 @@ def main():
         try:
             result = locate_recording(args.audio, args.tracks, args.start_utc, args.area_center,
                                       args.output, channel=args.channel, max_seconds=args.max_seconds,
-                                      published_reference=args.published_reference)
+                                      published_reference=args.published_reference, second_audio=args.second_audio,
+                                      clip_gap_s=args.clip_gap_s, area_width_km=args.area_width_km,
+                                      time_radius_s=args.time_radius_s)
         except (OSError, ValueError) as error:
             parser.error(str(error))
         print(json.dumps(result, indent=2, allow_nan=False))

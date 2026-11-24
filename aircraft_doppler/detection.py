@@ -148,7 +148,7 @@ def detect_two_events_among_distractors(spec, sound_speed_mps=343.0):
 FIELD_BANDS_HZ = ((60, 200), (150, 350), (275, 450))
 
 
-def detect_field_events(spec, sound_speed_mps=343.0, *, edge_aware=True):
+def detect_field_events(spec, sound_speed_mps=343.0, *, edge_aware=True, max_events=2):
     """Select up to two disjoint ridges using audio alone and fixed bands."""
     proposals, rejected = [], []
     for low, high in FIELD_BANDS_HZ:
@@ -177,7 +177,7 @@ def detect_field_events(spec, sound_speed_mps=343.0, *, edge_aware=True):
                for other, _ in selected):
             continue
         selected.append((event, diag))
-        if len(selected) == 2:
+        if len(selected) == max_events:
             break
     selected.sort(key=lambda item: item[0].cpa_audio_s)
     return [event for event, _ in selected], {

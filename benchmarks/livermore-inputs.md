@@ -5,14 +5,17 @@ adsb.lol-only Livermore search. Its top candidate was 320.619 m (about 321 m)
 from the study-reported phone position, and the matching ordered pair ranked
 first of 17,101. The verifier abstained with zero acoustic survivors.
 
-The [Livermore portfolio map](https://khybolt.github.io/doppler/#livermore)
-shows a separate assisted diagnostic, not that search. It used the study's
-supplied hand-guided pitch traces and matching flight tracks, with a fixed
+The [Livermore case study](https://khybolt.github.io/doppler/#livermore)
+shows the newer automatic replay (1 of 12,215 covered ordered pairs, about
+405 m from the study's phone position, no verified fix). To rerun that
+search, use the [automatic replay instructions](livermore-replay.md).
+A separate assisted diagnostic used the
+study's supplied hand-guided pitch traces and matching flight tracks, with a fixed
 nominal UTC start for each clip. Its top candidate was about 144 m from the
 same reference. This replay also abstained. The
 [assisted map data](https://khybolt.github.io/doppler/assets/livermore/livermore-assisted-real-audio-map-v1.json)
-pins solver revision `2c4b48ab7fbc7a1cd94a3f2c3ea7ef8bee848633`. Neither
-distance is a verified accuracy measurement; the phone position has no
+pins solver revision `2c4b48ab7fbc7a1cd94a3f2c3ea7ef8bee848633`. These
+distances are not verified accuracy measurements; the phone position has no
 independent survey bound.
 
 ## Verify the inputs

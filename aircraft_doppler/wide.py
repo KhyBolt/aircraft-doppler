@@ -1,5 +1,5 @@
-"""Fixed, offline, synthetic-only 10-by-10 km benchmark (no data source or network)."""
-from dataclasses import asdict
+"""Offline ridge fitting on a bounded square search lattice."""
+from dataclasses import asdict, replace
 from itertools import product
 from pathlib import Path
 from time import perf_counter
@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from .audio import make_spectrogram, read_audio
 from .benchmark import STFT_SETTINGS, XYZ, _write_json
-from .detection import InsufficientEvidence, detect_two_events_among_distractors
+from .detection import FIELD_BANDS_HZ, InsufficientEvidence, detect_field_events, detect_two_events_among_distractors
 from .io import load_inputs
 from .search import _time_offsets
 
@@ -69,10 +69,8 @@ def _trace_loss(curve, obs, band, offsets, coverage=None):
     """Profile f0 analytically within the audio-only band for each clock."""
     arrival, ratio = curve
     absolute = offsets[:,None]+obs[:,0]
-    if coverage is None:
-        valid = (absolute[:,0] >= arrival[0]) & (absolute[:,-1] <= arrival[-1])
-    else:
-        valid = (coverage[0]+offsets >= arrival[0]) & (coverage[1]+offsets <= arrival[-1])
+    start, stop = coverage if coverage is not None else (obs[0,0], obs[-1,0])
+    valid = (offsets >= arrival[0]-start) & (offsets <= arrival[-1]-stop)
     losses = np.full(len(offsets), np.inf)
     f0 = np.full(len(offsets), np.nan)
     if valid.any():
@@ -148,20 +146,39 @@ class Profile:
             for i,(obs,band) in enumerate(zip(self.traces,self.bands)):
                 if engine not in self.allowed_engines[i]:
                     continue
+                coverage = self.coverage[i] or (obs[0,0], obs[-1,0])
+                lower = max(self.clock_lo, curve[0][0] - coverage[0])
+                upper = min(self.clock_hi, curve[0][-1] - coverage[1])
+                if lower > upper:
+                    continue
                 total, f = _trace_loss(curve,obs,band,self.clocks,self.coverage[i])
-                if np.isfinite(total).any():
-                    options[i][fid] = aid,total,f
-                    curves[fid] = curve
+                options[i][fid] = aid,total,f,lower,upper
+                curves[fid] = curve
         rows = []
         for choice in product(*(options_for_event.items() for options_for_event in options)):
             ids, matches = zip(*choice)
-            aircraft, losses, sources = zip(*matches)
+            aircraft, losses, sources, lower, upper = zip(*matches)
             if len(set(aircraft)) < len(ids):
                 continue
             scores = np.mean(losses, axis=0)
             self.audit["global_clock_pair_hypotheses_with_coverage"] += int(np.isfinite(scores).sum())
             minima = _minima(scores)
             if not len(minima):
+                common_start, common_end = max(lower), min(upper)
+                if common_start > common_end:
+                    continue
+                segments = max(2, 2 * int(np.ceil((common_end-common_start)/(2*LOCAL_STEP_S))))
+                offsets = np.unique(np.linspace(common_start, common_end, segments + 1))
+                profiled = [_trace_loss(curves[fid], trace, band, offsets, coverage)
+                            for fid, trace, band, coverage in zip(ids, self.traces, self.bands, self.coverage)]
+                local_losses, local_sources = zip(*profiled)
+                total = np.mean(local_losses, axis=0)
+                self.audit["local_clock_pair_hypotheses_with_coverage"] += int(np.isfinite(total).sum())
+                winner = int(np.argmin(total))
+                if np.isfinite(total[winner]):
+                    rows.append((*pos, total[winner], "|".join(ids), offsets[winner],
+                                 *(loss[winner] for loss in local_losses),
+                                 *(source[winner] for source in local_sources)))
                 continue
             i = minima[0]
             best = (scores[i], self.clocks[i], *(loss[i] for loss in losses), *(f[i] for f in sources))
@@ -203,7 +220,7 @@ class Profile:
         return self._table([row for pos in points for row in self.cache[pos]])
 
 
-def _modes(table, points, spacing, limit, radius, pair_margin):
+def _modes(table, points, spacing, limit, radius, pair_margin, *, edge_m=EDGE_M):
     """Represent separate spatial minima and plausible distinct track pairs."""
     tested = set(points)
     best = table.drop_duplicates(XYZ)
@@ -226,16 +243,16 @@ def _modes(table, points, spacing, limit, radius, pair_margin):
         if not all(np.hypot(x-p[0],y-p[1]) >= 2*radius for p in leaders):
             continue
         around = [(x+dx,y+dy,z) for dx in (-spacing,0,spacing) for dy in (-spacing,0,spacing)
-                  if dx or dy if abs(x+dx) <= EDGE_M and abs(y+dy) <= EDGE_M]
+                  if dx or dy if abs(x+dx) <= edge_m and abs(y+dy) <= edge_m]
         if all(n in tested and by_site.get(n,np.inf) >= by_site[q] for n in around):
             leaders.append(q)
     return leaders
 
 
-def _refine(centers, spacing, radius):
+def _refine(centers, spacing, radius, *, edge_m=EDGE_M):
     return sorted({(x+dx,y+dy,z) for x,y,z in centers
                    for dx in range(-radius,radius+1,spacing) for dy in range(-radius,radius+1,spacing)
-                   if abs(x+dx) <= EDGE_M and abs(y+dy) <= EDGE_M})
+                   if abs(x+dx) <= edge_m and abs(y+dy) <= edge_m})
 
 
 def _grid(points, score_table):
@@ -270,7 +287,21 @@ def _best_fit(table, event_count):
                                   for i in range(1, event_count + 1)]}
 
 
-def infer(audio_path, tracks_path, points_path, output, *, deadline=None, hardened=False, channel=0):
+def _clip_event(path, channel, offset_s, deadline):
+    sample_rate, audio, duration = read_audio(path, channel=channel, include_duration=True)
+    spec = make_spectrogram(audio, sample_rate, **STFT_SETTINGS)
+    _deadline_check(deadline)
+    events, audit = detect_field_events(spec, SOUND_MPS, max_events=1)
+    shifted = [replace(event, window_s=tuple(t + offset_s for t in event.window_s),
+                       cpa_audio_s=event.cpa_audio_s + offset_s,
+                       trace_points=(np.asarray(event.trace_points) + [offset_s, 0]).tolist())
+               for event in events]
+    return shifted, {**audit, "clip_start_offset_s": offset_s}, duration, float(np.median(np.diff(spec.f)))
+
+
+def infer(audio_path, tracks_path, points_path, output, *, deadline=None, hardened=False, channel=0,
+          field_detection=False, second_audio_path=None, clip_gap_s=None, edge_m=EDGE_M,
+          clock_half_s=CLOCK_HALF_S):
     """Inference receives no scene ID, source frequencies, event picks, or truth."""
     start = perf_counter()
     output = Path(output)
@@ -278,43 +309,74 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
     if any(output.iterdir()):
         raise ValueError("Choose an empty output directory")
     paths = {"wav":Path(audio_path), "tracks":Path(tracks_path), "candidates":Path(points_path)}
-    report = {"profile":"synthetic-wide-v3-blocked" if hardened else PROFILE,"status":"abstained","settings":PROGRAM_SETTINGS,
+    if second_audio_path is not None:
+        paths["second_wav"] = Path(second_audio_path)
+    settings = {**PROGRAM_SETTINGS, "bounds_xy_m": [[-edge_m, edge_m], [-edge_m, edge_m]],
+                "clock_global_bounds_s": [-clock_half_s, clock_half_s],
+                "clock_global_offsets": len(_time_offsets(clock_half_s, CLOCK_STEP_S))}
+    report = {"profile":"synthetic-wide-v3-blocked" if hardened else PROFILE,"status":"abstained","settings":settings,
               "inputs_sha256":{k:_sha256(v) for k,v in paths.items()}}
+    if field_detection or second_audio_path is not None:
+        report.update(profile="field-wide-edge-aware-v1", settings={
+            **settings, "field_detector_bands_hz": FIELD_BANDS_HZ,
+            "field_detector_edge_half_windows_s": [12, 20, 32],
+        })
     def finish():
         report["inference_wall_s"] = round(perf_counter()-start,3)
         _write_json(output/"inference.json",report)
         return report
 
-    sr,audio = read_audio(paths["wav"], channel=channel)
-    report["recording_duration_s"] = len(audio)/sr
-    spec = make_spectrogram(audio,sr,**STFT_SETTINGS)
-    del audio
     tracks,point_table,frame = load_inputs(paths["tracks"],paths["candidates"])
     candidates = _points(point_table[XYZ].to_numpy())
-    expected = [(x,y,0) for x in range(-EDGE_M,EDGE_M+1,SURVEY_M) for y in range(-EDGE_M,EDGE_M+1,SURVEY_M)]
-    if frame != "cartesian" or set(candidates) != set(expected) or not np.allclose(
+    lattice = range(-edge_m, edge_m + 1, SURVEY_M)
+    expected = set(product(lattice, lattice, (0,)))
+    if frame != "cartesian" or set(candidates) != expected or not np.allclose(
             point_table[XYZ],candidates,rtol=0,atol=0):
-        raise ValueError("Wide benchmark is fixed to the full synthetic 10 × 10 km lattice")
+        raise ValueError(f"Wide search requires the full {2 * edge_m / 1000:g} × {2 * edge_m / 1000:g} km lattice")
     try:
         _deadline_check(deadline)
+        if second_audio_path is not None:
+            first, first_audit, first_duration, hz_bin = _clip_event(paths["wav"], channel, 0., deadline)
+            if clip_gap_s < first_duration:
+                raise ValueError("--clip-gap-s must not be shorter than the first clip (the clips must not overlap)")
+            second, second_audit, second_duration, _ = _clip_event(paths["second_wav"], channel, clip_gap_s, deadline)
+            events = first + second
+            detections = [dict(proposal, clip=clip) for clip, audit in enumerate((first_audit, second_audit), 1)
+                          for proposal in audit["selected"]]
+            audio_audit = {"selected": detections, "clips": [first_audit, second_audit]}
+            report.update(clip_durations_s=[first_duration, second_duration],
+                          recording_duration_s=first_duration + second_duration)
+        else:
+            sr, audio = read_audio(paths["wav"], channel=channel)
+            report["recording_duration_s"] = len(audio) / sr
+            spec = make_spectrogram(audio, sr, **STFT_SETTINGS)
+            del audio
+            _deadline_check(deadline)
+            if field_detection:
+                events, audio_audit = detect_field_events(spec, SOUND_MPS)
+                detections = audio_audit["selected"]
+            else:
+                events, detections, audio_audit = detect_two_events_among_distractors(spec, SOUND_MPS)
+            hz_bin = float(np.median(np.diff(spec.f)))
+            del spec
     except BudgetExceeded as error:
         report.update(status="timed_out", abstention_reasons=[str(error)])
         finish()
         raise
-    try:
-        events, detections, audio_audit = detect_two_events_among_distractors(spec,SOUND_MPS)
     except InsufficientEvidence as exc:
         report.update({"audio_audit":getattr(exc,"audit",{}),"abstention_reasons":[str(exc)]})
         return finish()
-    hz_bin = float(np.median(np.diff(spec.f)))
-    del spec
-    report.update({"audio_only_detection":detections,"audio_audit":audio_audit,
-                   "audio_event_separation_s":round(events[1].cpa_audio_s-events[0].cpa_audio_s,3)})
+    report.update({"audio_only_detection":detections,"audio_audit":audio_audit})
+    if not events:
+        report["abstention_reasons"] = ["No supported descending tone was found (0 passed discovery)"]
+        return finish()
+    if len(events) == 2:
+        report["audio_event_separation_s"] = round(events[1].cpa_audio_s-events[0].cpa_audio_s,3)
     identifiers = sorted(t.flight_id for t in tracks)
     report["input_track_ids"] = identifiers
     _write_json(output/"detected_events.json",[asdict(e) for e in events])
     use_traces = None
-    if hardened:
+    if hardened and len(events) == 2:
         from .corroboration import (SETTINGS as HOLD_SETTINGS, MIN_TRAIN_OBSERVATIONS,
                                     MIN_HELDOUT_BLOCKS, split_trace, check_locked_hypothesis)
         report["corroboration_settings"] = {**HOLD_SETTINGS,"require_full_track_coverage_and_disjoint_windows":True}
@@ -328,7 +390,7 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
                for fit,blocks in zip(use_traces,held_blocks)):
             report["abstention_reasons"] = ["Insufficient audio for guarded fit and verification"]
             return finish()
-    scorer = Profile(tracks,events,deadline,trace_override=use_traces)
+    scorer = Profile(tracks, events, deadline, trace_override=use_traces, clock_half_s=clock_half_s)
     try:
         stage_points = [candidates]
         table = _score_stage(scorer, candidates, output, SURVEY_M)
@@ -336,13 +398,14 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
                                   "feasible_positions":len(table.drop_duplicates(XYZ)),
                                   "audit_cumulative":dict(scorer.audit)}]
         if table.empty:
-            report["abstention_reasons"] = ["No pair of distinct tracks covers both ridges at a common clock offset"]
+            report["abstention_reasons"] = ["No pair of distinct tracks covers both ridges at a common clock offset"
+                                            if len(events) == 2 else "No track covers the detected ridge"]
             return finish()
         for k,(step,radius,limit,pair_margin) in enumerate(STAGES):
             previous_step = SURVEY_M if k == 0 else STAGES[k-1][0]
             reference = set(q for stage in stage_points for q in stage if all(v%previous_step==0 for v in q))
-            centers = _modes(table,reference,previous_step,limit,radius,pair_margin)
-            points = _refine(centers,step,radius)
+            centers = _modes(table,reference,previous_step,limit,radius,pair_margin,edge_m=edge_m)
+            points = _refine(centers,step,radius,edge_m=edge_m)
             stage = _score_stage(scorer, points, output, step)
             stage_points.append(points)
             all_points = sorted(set(q for group in stage_points for q in group))
@@ -363,10 +426,14 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
     table.to_csv(output/"final_scores.csv",index=False)
     by_pair = table.drop_duplicates("flight_pair")
     by_pair.to_csv(output/"best_per_pair.csv",index=False)
+    if len(events) == 1:
+        report.update(best_fit_diagnostic=_best_fit(table, len(events)), audit=dict(scorer.audit),
+                      abstention_reasons=["One ridge produced a fit; two are required to verify a location"])
+        return finish()
     win = table.iloc[0]
     near = table[table.loss_hz2 <= win.loss_hz2+NEAR_BEST_MSE_HZ2].drop_duplicates(XYZ)
     span = np.ptp(near[["x_m","y_m"]].to_numpy(float),axis=0)
-    edge = bool((abs(near[["x_m","y_m"]]) == EDGE_M).any().any())
+    edge = bool((abs(near[["x_m","y_m"]]) == edge_m).any().any())
     span_too_wide = np.linalg.norm(span) > MAX_SPAN_M
     step = STAGES[-1][0]
     fine = set(stage_points[-1])
@@ -382,9 +449,9 @@ def infer(audio_path, tracks_path, points_path, output, *, deadline=None, harden
         reasons.append("Near-best sampled points touch the stated outer boundary")
     if span_too_wide:
         reasons.append("Near-best sampled points span too wide an area for a single point estimate")
-    if not complete:
+    if not complete and not edge:
         reasons.append("Near-best sampled points lack a complete final neighborhood")
-    if abs(win.clock_offset_s) >= CLOCK_HALF_S:
+    if abs(win.clock_offset_s) >= clock_half_s:
         reasons.append("Best clock offset reaches the global uncertainty bound")
     report.update({"audit":dict(scorer.audit),
                    "best_fit_diagnostic":_best_fit(table, len(events)),
